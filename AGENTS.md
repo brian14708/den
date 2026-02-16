@@ -19,6 +19,7 @@ nix build                               # release binary at ./result/bin/den
 nix build .#oci                         # OCI container image
 cargo fmt                               # format Rust
 cd web && pnpm fmt                      # format frontend
+cd web && pnpm lint                     # eslint frontend
 ```
 
 ## Layout
@@ -49,7 +50,7 @@ flake.nix          — full build pipeline + dev shell
 - `rust-embed` reads `web/out/` from disk in debug, embeds in release
 - Keep dependencies minimal
 - Git: conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), lowercase, imperative, no period
-- Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm fmt && pnpm build`
+- Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm lint && pnpm fmt && pnpm build`
 
 ## Environment
 

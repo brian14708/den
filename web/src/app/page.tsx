@@ -35,7 +35,7 @@ export default function Home() {
   };
 
   useEffect(() => {
-    checkStatus();
+    checkStatus(); // eslint-disable-line react-hooks/set-state-in-effect -- fetch on mount
   }, []);
 
   if (authState === "loading") {

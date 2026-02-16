@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "fmt": "prettier --write .",
-    "fmt:check": "prettier --check ."
+    "fmt:check": "prettier --check .",
+    "lint": "eslint ."
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -23,6 +24,9 @@
     "@types/node": "25.2.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "eslint": "^9.39.2",
+    "eslint-config-next": "^16.1.6",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "shadcn": "^3.8.4",

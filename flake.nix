@@ -51,7 +51,7 @@
               inherit (finalAttrs) pname version src;
               pnpm = pkgs.pnpm_10;
               fetcherVersion = 3;
-              hash = "sha256-am5Wmy2UxSfO7ng0e5L/vFfIqXtS7fhBlTii3VrN1AE=";
+              hash = "sha256-yWiOsMJzuFzDZUq5o7BA75u46s6O7OpvHiFl0f4ArTs=";
             };
 
             env.NEXT_TELEMETRY_DISABLED = "1";
