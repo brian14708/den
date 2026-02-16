@@ -15,6 +15,7 @@ pub struct Claims {
     pub exp: i64,
 }
 
+#[derive(Clone)]
 pub struct AuthUser {
     pub user_id: String,
 }
@@ -44,6 +45,13 @@ fn validate_token(secret: &[u8], token: &str) -> Result<Claims, jsonwebtoken::er
     Ok(data.claims)
 }
 
+pub fn user_id_from_token(
+    secret: &[u8],
+    token: &str,
+) -> Result<String, jsonwebtoken::errors::Error> {
+    Ok(validate_token(secret, token)?.sub)
+}
+
 pub fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
     let builder = Cookie::build(("den_session", token))
         .path("/")
@@ -67,11 +75,9 @@ impl FromRequestParts<AppState> for AuthUser {
     ) -> Result<Self, Self::Rejection> {
         let jar = CookieJar::from_request_parts(parts, state).await.unwrap();
         let cookie = jar.get("den_session").ok_or(StatusCode::UNAUTHORIZED)?;
-        let claims = validate_token(&state.jwt_secret, cookie.value())
+        let user_id = user_id_from_token(&state.jwt_secret, cookie.value())
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
-        Ok(AuthUser {
-            user_id: claims.sub,
-        })
+        Ok(AuthUser { user_id })
     }
 }
 

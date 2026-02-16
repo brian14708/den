@@ -20,6 +20,10 @@ interface Passkey {
   last_used: string | null;
 }
 
+interface PasskeyListProps {
+  onUnauthorized?: () => void;
+}
+
 function formatDate(iso: string): string {
   return new Date(iso + "Z").toLocaleDateString(undefined, {
     year: "numeric",
@@ -28,7 +32,7 @@ function formatDate(iso: string): string {
   });
 }
 
-export function PasskeyList({ userName }: { userName: string }) {
+export function PasskeyList({ onUnauthorized }: PasskeyListProps) {
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -40,6 +44,10 @@ export function PasskeyList({ userName }: { userName: string }) {
   const fetchPasskeys = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/passkeys");
+      if (res.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
       if (!res.ok) throw new Error("Failed to load passkeys");
       setPasskeys(await res.json());
     } catch {
@@ -47,7 +55,7 @@ export function PasskeyList({ userName }: { userName: string }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onUnauthorized]);
 
   useEffect(() => {
     fetchPasskeys();
@@ -62,6 +70,10 @@ export function PasskeyList({ userName }: { userName: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed }),
       });
+      if (res.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
       if (!res.ok) throw new Error("Rename failed");
       setEditingId(null);
       await fetchPasskeys();
@@ -76,6 +88,10 @@ export function PasskeyList({ userName }: { userName: string }) {
       const res = await fetch(`/api/auth/passkeys/${deleteTarget.id}`, {
         method: "DELETE",
       });
+      if (res.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
       if (!res.ok) throw new Error("Delete failed");
       setDeleteTarget(null);
       await fetchPasskeys();
@@ -90,9 +106,13 @@ export function PasskeyList({ userName }: { userName: string }) {
     setAdding(true);
     setError(null);
     try {
-      await registerPasskey(userName, name.trim());
+      await registerPasskey(null, name.trim());
       await fetchPasskeys();
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "Unauthorized") {
+        onUnauthorized?.();
+        return;
+      }
       setError("Failed to add passkey");
     } finally {
       setAdding(false);

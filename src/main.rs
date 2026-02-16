@@ -42,7 +42,7 @@ async fn main() {
     };
 
     let app = axum::Router::new()
-        .nest("/api", api::router())
+        .nest("/api", api::router(state.clone()))
         .fallback(frontend::handler)
         .layer(CompressionLayer::new())
         .with_state(state);

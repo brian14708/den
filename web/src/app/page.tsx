@@ -1,74 +1,37 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Setup } from "@/components/auth/setup";
-import { Login } from "@/components/auth/login";
+import { useRouter } from "next/navigation";
 import { Dashboard } from "@/components/dashboard";
-import {
-  type AuthStatus,
-  getAuthStatus,
-  setAuthenticatedAuthStatus,
-  setLoggedOutAuthStatus,
-} from "@/lib/auth-status";
-
-type AuthState = "loading" | "setup" | "login" | "authenticated";
+import { getAuthStatus, setLoggedOutAuthStatus } from "@/lib/auth-status";
+import { authRedirectPathForSetup } from "@/lib/auth-routing";
 
 export default function Home() {
-  const [authState, setAuthState] = useState<AuthState>("loading");
-  const [userName, setUserName] = useState("");
-
-  const applyStatus = useCallback((status: AuthStatus) => {
-    if (status.authenticated && status.user_name) {
-      setUserName(status.user_name);
-      setAuthState("authenticated");
-      return;
-    }
-    setUserName("");
-    setAuthState(status.setup_complete ? "login" : "setup");
-  }, []);
-
-  const checkStatus = useCallback(
-    async (force = false) => {
-      try {
-        const status = await getAuthStatus({ force });
-        applyStatus(status);
-      } catch {
-        setAuthState("setup");
-      }
-    },
-    [applyStatus],
-  );
-
-  const handleSetupComplete = useCallback((name: string) => {
-    setAuthenticatedAuthStatus(name);
-    setUserName(name);
-    setAuthState("authenticated");
-  }, []);
-
-  const handleLoginComplete = useCallback(
-    async (name: string | null) => {
-      if (name) {
-        setAuthenticatedAuthStatus(name);
-        setUserName(name);
-        setAuthState("authenticated");
-        return;
-      }
-      await checkStatus(true);
-    },
-    [checkStatus],
-  );
+  const router = useRouter();
+  const [userName, setUserName] = useState<string | null>(null);
 
   const handleLogout = useCallback(() => {
     setLoggedOutAuthStatus();
-    setUserName("");
-    setAuthState("login");
-  }, []);
+    router.replace("/login");
+  }, [router]);
 
   useEffect(() => {
-    void checkStatus(); // eslint-disable-line react-hooks/set-state-in-effect -- fetch auth status on initial mount
-  }, [checkStatus]);
+    const load = async () => {
+      try {
+        const status = await getAuthStatus({ force: true });
+        if (status.authenticated && status.user_name) {
+          setUserName(status.user_name);
+          return;
+        }
+        router.replace(authRedirectPathForSetup(status.setup_complete));
+      } catch {
+        router.replace("/setup");
+      }
+    };
+    void load();
+  }, [router]);
 
-  if (authState === "loading") {
+  if (!userName) {
     return (
       <main className="flex min-h-screen items-center justify-center">
         <p className="text-muted-foreground">Loading...</p>
@@ -76,13 +39,5 @@ export default function Home() {
     );
   }
 
-  return (
-    <main className="flex min-h-screen items-center justify-center">
-      {authState === "setup" && <Setup onComplete={handleSetupComplete} />}
-      {authState === "login" && <Login onComplete={handleLoginComplete} />}
-      {authState === "authenticated" && (
-        <Dashboard userName={userName} onLogout={handleLogout} />
-      )}
-    </main>
-  );
+  return <Dashboard userName={userName} onLogout={handleLogout} />;
 }

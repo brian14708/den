@@ -173,16 +173,24 @@ async function getCredential(
 }
 
 export async function registerPasskey(
-  userName: string,
+  userName: string | null,
   passkeyName: string,
 ): Promise<void> {
   assertPasskeySupport();
 
+  const payload: { passkey_name: string; user_name?: string } = {
+    passkey_name: passkeyName,
+  };
+  if (userName && userName.trim()) {
+    payload.user_name = userName.trim();
+  }
+
   const beginRes = await fetch("/api/auth/register/begin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_name: userName, passkey_name: passkeyName }),
+    body: JSON.stringify(payload),
   });
+  if (beginRes.status === 401) throw new Error("Unauthorized");
   if (!beginRes.ok) throw new Error("Registration failed to start");
   const { challenge_id, options } = await beginRes.json();
 
@@ -237,6 +245,7 @@ export async function registerPasskey(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ challenge_id, credential: credentialData }),
   });
+  if (completeRes.status === 401) throw new Error("Unauthorized");
   if (!completeRes.ok) throw new Error("Registration failed to complete");
 }
 

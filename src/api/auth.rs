@@ -1,5 +1,7 @@
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::{Extension, Path, State};
+use axum::http::{Request, StatusCode};
+use axum::middleware::{Next, from_fn_with_state};
+use axum::response::Response;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
@@ -21,7 +23,7 @@ struct AuthStatus {
 
 #[derive(Deserialize)]
 struct RegisterBeginRequest {
-    user_name: String,
+    user_name: Option<String>,
     passkey_name: String,
 }
 
@@ -73,7 +75,13 @@ struct RenameRequest {
 
 // --- Router ---
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
+    let protected_routes = Router::new()
+        .route("/auth/passkeys", get(list_passkeys))
+        .route("/auth/passkeys/{id}/name", patch(rename_passkey))
+        .route("/auth/passkeys/{id}", delete(delete_passkey))
+        .route_layer(from_fn_with_state(state, require_auth));
+
     Router::new()
         .route("/auth/status", get(status))
         .route("/auth/register/begin", post(register_begin))
@@ -81,12 +89,23 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login/begin", post(login_begin))
         .route("/auth/login/complete", post(login_complete))
         .route("/auth/logout", post(logout))
-        .route("/auth/passkeys", get(list_passkeys))
-        .route("/auth/passkeys/{id}/name", patch(rename_passkey))
-        .route("/auth/passkeys/{id}", delete(delete_passkey))
+        .merge(protected_routes)
 }
 
 // --- Handlers ---
+
+async fn require_auth(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    mut request: Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let cookie = jar.get("den_session").ok_or(StatusCode::UNAUTHORIZED)?;
+    let user_id = auth::user_id_from_token(&state.jwt_secret, cookie.value())
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    request.extensions_mut().insert(AuthUser { user_id });
+    Ok(next.run(request).await)
+}
 
 async fn status(
     State(state): State<AppState>,
@@ -123,7 +142,7 @@ async fn register_begin(
         .ok();
 
     // Check if user exists
-    let existing: Option<(String,)> = sqlx::query_as("SELECT id FROM user LIMIT 1")
+    let existing: Option<(String, String)> = sqlx::query_as("SELECT id, name FROM user LIMIT 1")
         .fetch_optional(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -133,12 +152,22 @@ async fn register_begin(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let (user_id, is_new_user) = match &existing {
-        Some((id,)) => (
-            Uuid::parse_str(id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    let (user_id, user_name, is_new_user) = match existing {
+        Some((id, name)) => (
+            Uuid::parse_str(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            name,
             false,
         ),
-        None => (Uuid::new_v4(), true),
+        None => {
+            let user_name = req
+                .user_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .ok_or(StatusCode::BAD_REQUEST)?
+                .to_string();
+            (Uuid::new_v4(), user_name, true)
+        }
     };
 
     // Get existing passkeys to exclude
@@ -168,7 +197,7 @@ async fn register_begin(
 
     let (ccr, reg_state) = state
         .webauthn
-        .start_passkey_registration(user_id, &req.user_name, &req.user_name, exclude)
+        .start_passkey_registration(user_id, &user_name, &user_name, exclude)
         .map_err(|e| {
             tracing::error!(error = %e, "registration start failed");
             StatusCode::INTERNAL_SERVER_ERROR
@@ -178,7 +207,7 @@ async fn register_begin(
     let context = RegistrationContext {
         webauthn_state: reg_state,
         user_id: user_id.to_string(),
-        user_name: req.user_name,
+        user_name,
         passkey_name: req.passkey_name,
         is_new_user,
     };
@@ -408,7 +437,7 @@ async fn logout(jar: CookieJar) -> CookieJar {
 
 async fn list_passkeys(
     State(state): State<AppState>,
-    auth: AuthUser,
+    Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<Vec<PasskeyInfo>>, StatusCode> {
     let rows: Vec<(i64, String, String, Option<String>)> =
         sqlx::query_as("SELECT id, name, created, last_used FROM passkey WHERE user_id = ?")
@@ -432,7 +461,7 @@ async fn list_passkeys(
 
 async fn rename_passkey(
     State(state): State<AppState>,
-    auth: AuthUser,
+    Extension(auth): Extension<AuthUser>,
     Path(id): Path<i64>,
     Json(req): Json<RenameRequest>,
 ) -> Result<StatusCode, StatusCode> {
@@ -453,7 +482,7 @@ async fn rename_passkey(
 
 async fn delete_passkey(
     State(state): State<AppState>,
-    auth: AuthUser,
+    Extension(auth): Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
     let result = sqlx::query(
