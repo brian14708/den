@@ -129,12 +129,14 @@ fn non_empty_string(value: Option<String>) -> Option<String> {
 }
 
 fn resolve_den_paths() -> DenPaths {
-    let xdg = BaseDirectories::with_prefix("den")
-        .unwrap_or_else(|error| panic!("failed to resolve XDG directories: {error}"));
+    let xdg = BaseDirectories::with_prefix("den");
     let config_path = xdg
         .place_config_file("config.toml")
         .unwrap_or_else(|error| panic!("failed to prepare config path: {error}"));
-    let default_database_path = xdg.get_data_home().join("den.db");
+    let default_database_path = xdg
+        .get_data_home()
+        .expect("XDG data home is not available")
+        .join("den.db");
 
     DenPaths {
         config_path,
@@ -385,7 +387,7 @@ async fn init_jwt_secret(db: &sqlx::SqlitePool) -> Vec<u8> {
             secret
         }
         None => {
-            use rand::RngCore;
+            use rand::Rng;
             let mut secret = vec![0u8; 64];
             rand::rng().fill_bytes(&mut secret);
 
