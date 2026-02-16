@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Login } from "@/components/auth/login";
-import { getAuthStatus, setAuthenticatedAuthStatus } from "@/lib/auth-status";
+import { getAuthStatus } from "@/lib/auth-status";
 import { type PasskeyAuthResult, type RedirectRequest } from "@/lib/webauthn";
 
 async function startRedirect(redirect: RedirectRequest): Promise<string> {
@@ -82,7 +82,6 @@ export default function LoginPage() {
         return;
       }
       if (result.userName) {
-        setAuthenticatedAuthStatus(result.userName);
         if (redirect) {
           try {
             const redirectUrl = await startRedirect(redirect);
@@ -98,9 +97,6 @@ export default function LoginPage() {
       try {
         const status = await getAuthStatus({ force: true });
         if (status.authenticated) {
-          if (status.user_name) {
-            setAuthenticatedAuthStatus(status.user_name);
-          }
           if (redirect) {
             try {
               const redirectUrl = await startRedirect(redirect);

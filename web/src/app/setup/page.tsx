@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Setup } from "@/components/auth/setup";
-import { getAuthStatus, setAuthenticatedAuthStatus } from "@/lib/auth-status";
+import { getAuthStatus } from "@/lib/auth-status";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -46,8 +46,7 @@ export default function SetupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center">
       <Setup
-        onComplete={async (userName) => {
-          setAuthenticatedAuthStatus(userName);
+        onComplete={async () => {
           router.replace("/");
         }}
       />

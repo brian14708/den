@@ -3,16 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dashboard } from "@/components/dashboard";
-import { getAuthStatus, setLoggedOutAuthStatus } from "@/lib/auth-status";
+import { getAuthStatus } from "@/lib/auth-status";
 import { authRedirectPathForSetup } from "@/lib/auth-routing";
 
 export default function Home() {
   const router = useRouter();
-  const [userName, setUserName] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   const handleLogout = useCallback(() => {
-    setLoggedOutAuthStatus();
     router.replace("/login");
   }, [router]);
 
@@ -21,7 +19,6 @@ export default function Home() {
       try {
         const status = await getAuthStatus({ force: true });
         if (status.authenticated) {
-          setUserName(status.user_name);
           setReady(true);
           return;
         }
@@ -41,5 +38,5 @@ export default function Home() {
     );
   }
 
-  return <Dashboard userName={userName} onLogout={handleLogout} />;
+  return <Dashboard onLogout={handleLogout} />;
 }

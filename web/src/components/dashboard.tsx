@@ -5,11 +5,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 interface DashboardProps {
-  userName: string | null;
   onLogout: () => void;
 }
 
-export function Dashboard({ userName, onLogout }: DashboardProps) {
+export function Dashboard({ onLogout }: DashboardProps) {
   const [health, setHealth] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,9 +27,6 @@ export function Dashboard({ userName, onLogout }: DashboardProps) {
     <main className="flex min-h-screen items-center justify-center">
       <div className="space-y-4 text-center">
         <h1 className="text-4xl font-bold tracking-tight">den</h1>
-        <p className="text-muted-foreground">
-          {userName ? `welcome, ${userName}` : "welcome"}
-        </p>
         {health !== null && (
           <p className="text-sm text-neutral-500">
             api:{" "}
