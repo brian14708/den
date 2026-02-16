@@ -17,7 +17,8 @@ cd web && pnpm install && pnpm build   # build frontend (required before cargo)
 cargo run                               # dev server on :3000
 nix build                               # release binary at ./result/bin/den
 nix build .#oci                         # OCI container image
-nix fmt                                 # format everything
+cargo fmt                               # format Rust
+cd web && pnpm fmt                      # format frontend
 ```
 
 ## Layout
@@ -31,20 +32,20 @@ src/frontend.rs    — rust-embed static serving + SPA fallback
 migrations/        — sqlx migrations (run automatically on startup)
 web/src/app/       — Next.js App Router pages
 build.rs           — creates empty web/out/ so rust-embed compiles without frontend
-flake.nix          — full build pipeline + dev shell + formatting
+flake.nix          — full build pipeline + dev shell
 ```
 
 ## Conventions
 
 - Rust edition 2024, TypeScript strict, Tailwind v4 CSS-based config
 - UI components: shadcn/ui (new-york style, neutral base color, `@/components/ui`). Add via `pnpm dlx shadcn@latest add <component>`
-- `nix fmt` runs rustfmt + nixfmt + prettier (with tailwind plugin)
+- Run formatters directly: `cargo fmt`, `cd web && pnpm fmt`, and `nix run nixpkgs#nixfmt-rfc-style -- <file>` for Nix files
 - API endpoints: create `src/api/foo.rs`, add `mod foo` + route in `src/api/mod.rs`
 - Frontend pages: create `web/src/app/foo/page.tsx`
 - `rust-embed` reads `web/out/` from disk in debug, embeds in release
 - Keep dependencies minimal
 - Git: conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), lowercase, imperative, no period
-- Always run lints before committing: `nix fmt`, `cargo clippy`, `cd web && pnpm fmt && pnpm build`
+- Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm fmt && pnpm build`
 
 ## Environment
 
@@ -64,3 +65,4 @@ Record architectural decisions, gotchas, and preferences here as they arise.
 - `build.rs` creates empty `web/out/` so the project compiles even without a frontend build
 - sqlx migrations: add numbered SQL files in `migrations/` (e.g. `0002_widgets.sql`), they run automatically on startup
 - nix build uses `SQLX_OFFLINE=true` — after changing queries, run `cargo sqlx prepare` to update `.sqlx/` cache
+- Run Rust/JS/Nix formatters directly instead of relying on a combined formatter command

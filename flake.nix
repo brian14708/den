@@ -7,10 +7,6 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    treefmt-nix = {
-      url = "github:numtide/treefmt-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
@@ -22,9 +18,6 @@
       ...
     }:
     flake-parts.lib.mkFlake { inherit inputs; } {
-      imports = [
-        inputs.treefmt-nix.flakeModule
-      ];
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -99,17 +92,6 @@
                   pkgs.sqlx-cli
                 ];
               };
-
-          treefmt = {
-            projectRootFile = "flake.nix";
-            programs = {
-              nixfmt.enable = true;
-              rustfmt = {
-                enable = true;
-                package = rustToolchain pkgs;
-              };
-            };
-          };
 
           apps = {
             default = {
