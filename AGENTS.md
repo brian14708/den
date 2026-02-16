@@ -78,3 +78,4 @@ Record architectural decisions, gotchas, and preferences here as they arise.
 - nix build uses `SQLX_OFFLINE=true` — after changing queries, run `cargo sqlx prepare` to update `.sqlx/` cache
 - Run Rust/JS formatters directly instead of relying on a combined formatter command
 - QR device login uses `/api/auth/redirect/start` to mint short-lived links and now accepts canonical `rp_origin` as a valid redirect target
+- `jsonwebtoken` v10 requires exactly one crypto provider feature; set `features = ["rust_crypto"]` (or `["aws_lc_rs"]`) to avoid runtime `CryptoProvider` panics

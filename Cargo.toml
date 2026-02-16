@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 axum = "0.8"
 axum-extra = { version = "0.12", features = ["cookie"] }
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 mime_guess = "2"
 rand = "0.10"
 rust-embed = "8"
