@@ -35,6 +35,7 @@ flake.nix          — full build pipeline + dev shell + formatting
 ## Conventions
 
 - Rust edition 2024, TypeScript strict, Tailwind v4 CSS-based config
+- UI components: shadcn/ui (new-york style, neutral base color, `@/components/ui`). Add via `pnpm dlx shadcn@latest add <component>`
 - `nix fmt` runs rustfmt + nixfmt + prettier (with tailwind plugin)
 - API endpoints: create `src/api/foo.rs`, add `mod foo` + route in `src/api/mod.rs`
 - Frontend pages: create `web/src/app/foo/page.tsx`
