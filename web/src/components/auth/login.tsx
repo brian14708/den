@@ -12,7 +12,7 @@ import {
 import { loginWithPasskey } from "@/lib/webauthn";
 
 interface LoginProps {
-  onComplete: () => void;
+  onComplete: (userName: string | null) => void | Promise<void>;
 }
 
 export function Login({ onComplete }: LoginProps) {
@@ -23,8 +23,8 @@ export function Login({ onComplete }: LoginProps) {
     setLoading(true);
     setError(null);
     try {
-      await loginWithPasskey();
-      onComplete();
+      const userName = await loginWithPasskey();
+      await onComplete(userName);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");
     } finally {

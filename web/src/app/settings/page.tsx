@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PasskeyList } from "@/components/passkey-list";
+import { getAuthStatus } from "@/lib/auth-status";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -11,17 +12,31 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/auth/status")
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data.authenticated) {
-          router.replace("/");
-        } else {
-          setUserName(data.user_name);
-          setLoading(false);
-        }
+    let cancelled = false;
+
+    const applyStatus = (status: {
+      authenticated: boolean;
+      user_name: string | null;
+    }) => {
+      if (!status.authenticated || !status.user_name) {
+        router.replace("/");
+        return;
+      }
+      setUserName(status.user_name);
+      setLoading(false);
+    };
+
+    getAuthStatus()
+      .then((status) => {
+        if (!cancelled) applyStatus(status);
       })
-      .catch(() => router.replace("/"));
+      .catch(() => {
+        if (!cancelled) router.replace("/");
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (loading) {

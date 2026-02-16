@@ -240,7 +240,11 @@ export async function registerPasskey(
   if (!completeRes.ok) throw new Error("Registration failed to complete");
 }
 
-export async function loginWithPasskey(): Promise<void> {
+interface LoginCompleteResponse {
+  user_name?: string | null;
+}
+
+export async function loginWithPasskey(): Promise<string | null> {
   assertPasskeySupport();
 
   const beginRes = await fetch("/api/auth/login/begin", {
@@ -299,4 +303,6 @@ export async function loginWithPasskey(): Promise<void> {
     body: JSON.stringify({ challenge_id, credential: credentialData }),
   });
   if (!completeRes.ok) throw new Error("Login failed to complete");
+  const completeData = (await completeRes.json()) as LoginCompleteResponse;
+  return completeData.user_name ?? null;
 }

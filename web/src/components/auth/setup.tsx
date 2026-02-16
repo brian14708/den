@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { registerPasskey } from "@/lib/webauthn";
 
 interface SetupProps {
-  onComplete: () => void;
+  onComplete: (userName: string) => void;
 }
 
 export function Setup({ onComplete }: SetupProps) {
@@ -23,12 +23,13 @@ export function Setup({ onComplete }: SetupProps) {
   const [loading, setLoading] = useState(false);
 
   const handleSetup = async () => {
-    if (!name.trim()) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
     setLoading(true);
     setError(null);
     try {
-      await registerPasskey(name.trim(), "initial");
-      onComplete();
+      await registerPasskey(trimmedName, "initial");
+      onComplete(trimmedName);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Setup failed");
     } finally {
