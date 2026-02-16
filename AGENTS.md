@@ -7,7 +7,7 @@ This file is the shared memory for all coding agents. Read it every session. Upd
 ## Stack
 
 - Rust (axum) backend, serves API + embedded frontend
-- Next.js 15 static export (React 19, Tailwind v4) via `rust-embed`
+- Next.js 16 static export (React 19, Tailwind v4) via `rust-embed`
 - Nix flake: crane (Rust) + pnpm (frontend) → single binary or OCI image
 
 ## Commands
@@ -39,7 +39,7 @@ flake.nix          — full build pipeline + dev shell
 
 - Rust edition 2024, TypeScript strict, Tailwind v4 CSS-based config
 - UI components: shadcn/ui (new-york style, neutral base color, `@/components/ui`). Add via `pnpm dlx shadcn@latest add <component>`
-- Run formatters directly: `cargo fmt`, `cd web && pnpm fmt`, and `nix run nixpkgs#nixfmt-rfc-style -- <file>` for Nix files
+- Run formatters directly: `cargo fmt` and `cd web && pnpm fmt`
 - API endpoints: create `src/api/foo.rs`, add `mod foo` + route in `src/api/mod.rs`
 - Frontend pages: create `web/src/app/foo/page.tsx`
 - `rust-embed` reads `web/out/` from disk in debug, embeds in release
@@ -65,4 +65,4 @@ Record architectural decisions, gotchas, and preferences here as they arise.
 - `build.rs` creates empty `web/out/` so the project compiles even without a frontend build
 - sqlx migrations: add numbered SQL files in `migrations/` (e.g. `0002_widgets.sql`), they run automatically on startup
 - nix build uses `SQLX_OFFLINE=true` — after changing queries, run `cargo sqlx prepare` to update `.sqlx/` cache
-- Run Rust/JS/Nix formatters directly instead of relying on a combined formatter command
+- Run Rust/JS formatters directly instead of relying on a combined formatter command
