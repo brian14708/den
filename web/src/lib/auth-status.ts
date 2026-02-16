@@ -15,6 +15,10 @@ const STORAGE_KEY = "den.auth.status.v1";
 let memoryCache: CachedAuthStatus | null = null;
 let inflight: Promise<AuthStatus> | null = null;
 
+function currentOrigin(): string {
+  return typeof window !== "undefined" ? window.location.origin : "";
+}
+
 function isAuthStatus(value: unknown): value is AuthStatus {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<AuthStatus>;
@@ -85,13 +89,44 @@ export function clearCachedAuthStatus(): void {
   removeStorage();
 }
 
+async function detectSetupCompleteUnauthenticated(): Promise<boolean> {
+  // Invalid registration payload lets us distinguish "setup complete" (401) from "not set up" (400).
+  const res = await fetch("/api/auth/register/begin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      user_name: "",
+      passkey_name: "",
+    }),
+  });
+  if (res.status === 401) return true;
+  if (res.status === 400) return false;
+  throw new Error("Failed to detect setup status");
+}
+
 async function fetchAuthStatus(): Promise<AuthStatus> {
-  const res = await fetch("/api/auth/status", { cache: "no-store" });
-  if (!res.ok) throw new Error("Failed to load auth status");
-  const data = (await res.json()) as unknown;
-  if (!isAuthStatus(data)) throw new Error("Invalid auth status response");
-  setCachedAuthStatusInternal(data);
-  return data;
+  const authCheck = await fetch("/api/auth/passkeys", { cache: "no-store" });
+  if (authCheck.status === 401) {
+    const status: AuthStatus = {
+      setup_complete: await detectSetupCompleteUnauthenticated(),
+      authenticated: false,
+      user_name: null,
+      canonical_origin: currentOrigin(),
+    };
+    setCachedAuthStatusInternal(status);
+    return status;
+  }
+  if (!authCheck.ok) throw new Error("Failed to load auth status");
+
+  const status: AuthStatus = {
+    setup_complete: true,
+    authenticated: true,
+    user_name: getCachedAuthStatus()?.user_name ?? null,
+    canonical_origin: currentOrigin(),
+  };
+  setCachedAuthStatusInternal(status);
+  return status;
 }
 
 export async function getAuthStatus(options?: {
@@ -114,9 +149,7 @@ export async function getAuthStatus(options?: {
 
 export function setAuthenticatedAuthStatus(userName: string): void {
   const current = getCachedAuthStatus();
-  const canonicalOrigin =
-    current?.canonical_origin ??
-    (typeof window !== "undefined" ? window.location.origin : "");
+  const canonicalOrigin = current?.canonical_origin ?? currentOrigin();
   setCachedAuthStatusInternal({
     setup_complete: current?.setup_complete ?? true,
     authenticated: true,
@@ -127,9 +160,7 @@ export function setAuthenticatedAuthStatus(userName: string): void {
 
 export function setLoggedOutAuthStatus(): void {
   const current = getCachedAuthStatus();
-  const canonicalOrigin =
-    current?.canonical_origin ??
-    (typeof window !== "undefined" ? window.location.origin : "");
+  const canonicalOrigin = current?.canonical_origin ?? currentOrigin();
   setCachedAuthStatusInternal({
     setup_complete: current?.setup_complete ?? true,
     authenticated: false,

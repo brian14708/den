@@ -6,20 +6,6 @@ import { Login } from "@/components/auth/login";
 import { getAuthStatus, setAuthenticatedAuthStatus } from "@/lib/auth-status";
 import { type PasskeyAuthResult, type RedirectRequest } from "@/lib/webauthn";
 
-function buildCanonicalLoginUrl(
-  canonicalOrigin: string,
-  redirect: RedirectRequest | undefined,
-): string {
-  const url = new URL("/login", canonicalOrigin);
-  if (redirect?.redirectOrigin) {
-    url.searchParams.set("redirect_origin", redirect.redirectOrigin);
-  }
-  if (redirect?.redirectPath) {
-    url.searchParams.set("redirect_path", redirect.redirectPath);
-  }
-  return url.toString();
-}
-
 async function startRedirect(redirect: RedirectRequest): Promise<string> {
   const res = await fetch("/api/auth/redirect/start", {
     method: "POST",
@@ -60,23 +46,7 @@ export default function LoginPage() {
     const load = async () => {
       try {
         const status = await getAuthStatus({ force: true });
-        const currentOrigin = window.location.origin;
-        if (
-          currentOrigin.toLowerCase() !== status.canonical_origin.toLowerCase()
-        ) {
-          const redirectForCanonical = redirectForLoad ?? {
-            redirectOrigin: currentOrigin,
-            redirectPath: "/",
-          };
-          window.location.assign(
-            buildCanonicalLoginUrl(
-              status.canonical_origin,
-              redirectForCanonical,
-            ),
-          );
-          return;
-        }
-        if (status.authenticated && status.user_name) {
+        if (status.authenticated) {
           if (redirectForLoad) {
             try {
               const redirectUrl = await startRedirect(redirectForLoad);
@@ -127,8 +97,10 @@ export default function LoginPage() {
       }
       try {
         const status = await getAuthStatus({ force: true });
-        if (status.authenticated && status.user_name) {
-          setAuthenticatedAuthStatus(status.user_name);
+        if (status.authenticated) {
+          if (status.user_name) {
+            setAuthenticatedAuthStatus(status.user_name);
+          }
           if (redirect) {
             try {
               const redirectUrl = await startRedirect(redirect);

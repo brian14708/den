@@ -17,14 +17,6 @@ use crate::state::AppState;
 
 // --- Types ---
 
-#[derive(Serialize)]
-struct AuthStatus {
-    setup_complete: bool,
-    authenticated: bool,
-    user_name: Option<String>,
-    canonical_origin: String,
-}
-
 #[derive(Deserialize)]
 struct RegisterBeginRequest {
     user_name: Option<String>,
@@ -116,7 +108,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route_layer(from_fn_with_state(state, require_auth));
 
     Router::new()
-        .route("/auth/status", get(status))
         .route("/auth/register/begin", post(register_begin))
         .route("/auth/register/complete", post(register_complete))
         .route("/auth/login/begin", post(login_begin))
@@ -269,30 +260,6 @@ async fn require_auth(
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
     request.extensions_mut().insert(AuthUser { user_id });
     Ok(next.run(request).await)
-}
-
-async fn status(
-    State(state): State<AppState>,
-    auth: MaybeAuthUser,
-) -> Result<Json<AuthStatus>, StatusCode> {
-    let user: Option<(String,)> = sqlx::query_as("SELECT name FROM user LIMIT 1")
-        .fetch_optional(&state.db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let setup_complete = user.is_some();
-    let authenticated = auth.0.is_some();
-
-    Ok(Json(AuthStatus {
-        setup_complete,
-        authenticated,
-        user_name: if authenticated {
-            user.map(|u| u.0)
-        } else {
-            None
-        },
-        canonical_origin: state.rp_origin.clone(),
-    }))
 }
 
 async fn register_begin(

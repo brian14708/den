@@ -9,6 +9,7 @@ import { authRedirectPathForSetup } from "@/lib/auth-routing";
 export default function Home() {
   const router = useRouter();
   const [userName, setUserName] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   const handleLogout = useCallback(() => {
     setLoggedOutAuthStatus();
@@ -19,8 +20,9 @@ export default function Home() {
     const load = async () => {
       try {
         const status = await getAuthStatus({ force: true });
-        if (status.authenticated && status.user_name) {
+        if (status.authenticated) {
           setUserName(status.user_name);
+          setReady(true);
           return;
         }
         router.replace(authRedirectPathForSetup(status.setup_complete));
@@ -31,7 +33,7 @@ export default function Home() {
     void load();
   }, [router]);
 
-  if (!userName) {
+  if (!ready) {
     return (
       <main className="flex min-h-screen items-center justify-center">
         <p className="text-muted-foreground">Loading...</p>

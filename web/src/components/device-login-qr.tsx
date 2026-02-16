@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
-import { getAuthStatus } from "@/lib/auth-status";
 
 interface DeviceLoginQrProps {
   onUnauthorized?: () => void;
@@ -38,12 +37,12 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function createRedirectUrl(): Promise<string> {
-  const status = await getAuthStatus({ force: true });
+  const redirectOrigin = window.location.origin;
   const res = await fetch("/api/auth/redirect/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      redirect_origin: status.canonical_origin,
+      redirect_origin: redirectOrigin,
       redirect_path: "/",
     }),
   });
