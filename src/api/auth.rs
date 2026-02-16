@@ -1,11 +1,14 @@
-use axum::extract::{Extension, Path, State};
-use axum::http::{Request, StatusCode};
+use axum::extract::{Extension, Path, Query, State};
+use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::middleware::{Next, from_fn_with_state};
-use axum::response::Response;
+use axum::response::{Redirect, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
+use time::{Duration, OffsetDateTime};
+use url::{Url, form_urlencoded};
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
@@ -19,6 +22,7 @@ struct AuthStatus {
     setup_complete: bool,
     authenticated: bool,
     user_name: Option<String>,
+    canonical_origin: String,
 }
 
 #[derive(Deserialize)]
@@ -45,6 +49,12 @@ struct LoginCompleteRequest {
     credential: PublicKeyCredential,
 }
 
+#[derive(Deserialize)]
+struct LoginBeginRequest {
+    redirect_origin: Option<String>,
+    redirect_path: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct RegistrationContext {
     webauthn_state: PasskeyRegistration,
@@ -58,6 +68,8 @@ struct RegistrationContext {
 struct AuthenticationContext {
     webauthn_state: PasskeyAuthentication,
     user_id: String,
+    redirect_origin: Option<String>,
+    redirect_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +83,27 @@ struct PasskeyInfo {
 #[derive(Deserialize)]
 struct RenameRequest {
     name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LoginRedirectClaims {
+    iss: String,
+    aud: String,
+    sub: String,
+    path: String,
+    iat: i64,
+    exp: i64,
+}
+
+#[derive(Deserialize)]
+struct RedirectCompleteQuery {
+    token: String,
+}
+
+#[derive(Deserialize)]
+struct RedirectStartRequest {
+    redirect_origin: String,
+    redirect_path: Option<String>,
 }
 
 // --- Router ---
@@ -88,11 +121,132 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/auth/register/complete", post(register_complete))
         .route("/auth/login/begin", post(login_begin))
         .route("/auth/login/complete", post(login_complete))
+        .route("/auth/redirect/start", post(redirect_start))
+        .route("/auth/redirect/complete", get(redirect_complete))
         .route("/auth/logout", post(logout))
         .merge(protected_routes)
 }
 
 // --- Handlers ---
+
+fn request_origin(headers: &HeaderMap, fallback_scheme: &str) -> Option<String> {
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(fallback_scheme);
+
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get(header::HOST))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?;
+
+    Some(format!("{proto}://{host}"))
+}
+
+fn request_secure_cookie(headers: &HeaderMap, fallback: bool) -> bool {
+    let fallback_scheme = if fallback { "https" } else { "http" };
+    request_origin(headers, fallback_scheme)
+        .map(|origin| origin.starts_with("https://"))
+        .unwrap_or(fallback)
+}
+
+fn normalize_origin(origin: &str) -> Option<String> {
+    let parsed = Url::parse(origin).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    if parsed.host_str().is_none() {
+        return None;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    Some(parsed.origin().ascii_serialization())
+}
+
+fn host_with_port(url: &Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host,
+    })
+}
+
+fn origin_host(origin: &str) -> Option<String> {
+    let origin = normalize_origin(origin)?;
+    let parsed = Url::parse(&origin).ok()?;
+    host_with_port(&parsed)
+}
+
+fn normalize_redirect_origin(
+    state: &AppState,
+    origin: Option<&str>,
+) -> Result<Option<String>, StatusCode> {
+    let Some(origin) = origin else {
+        return Ok(None);
+    };
+    let normalized = normalize_origin(origin).ok_or(StatusCode::BAD_REQUEST)?;
+    if normalized.eq_ignore_ascii_case(&state.rp_origin) {
+        return Ok(None);
+    }
+    let host = origin_host(&normalized).ok_or(StatusCode::BAD_REQUEST)?;
+    if !state.allowed_hosts.contains(host.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(Some(normalized))
+}
+
+fn normalize_redirect_path(path: Option<&str>) -> String {
+    let Some(path) = path.map(str::trim) else {
+        return "/".to_string();
+    };
+    if path.starts_with('/') && !path.starts_with("//") && !path.contains('\\') {
+        path.to_string()
+    } else {
+        "/".to_string()
+    }
+}
+
+fn redirect_complete_url(target_origin: &str, token: &str) -> String {
+    let mut query = form_urlencoded::Serializer::new(String::new());
+    query.append_pair("token", token);
+    format!(
+        "{target_origin}/api/auth/redirect/complete?{}",
+        query.finish()
+    )
+}
+
+async fn issue_login_redirect_token(
+    state: &AppState,
+    user_id: &str,
+    target_origin: &str,
+    target_path: &str,
+) -> Result<String, StatusCode> {
+    let now = OffsetDateTime::now_utc();
+    let expires_at = now + Duration::seconds(60);
+
+    let claims = LoginRedirectClaims {
+        iss: state.rp_origin.clone(),
+        aud: target_origin.to_string(),
+        sub: user_id.to_string(),
+        path: target_path.to_string(),
+        iat: now.unix_timestamp(),
+        exp: expires_at.unix_timestamp(),
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&state.jwt_secret),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
 
 async fn require_auth(
     State(state): State<AppState>,
@@ -127,6 +281,7 @@ async fn status(
         } else {
             None
         },
+        canonical_origin: state.rp_origin.clone(),
     }))
 }
 
@@ -231,6 +386,7 @@ async fn register_complete(
     State(state): State<AppState>,
     auth: MaybeAuthUser,
     jar: CookieJar,
+    headers: HeaderMap,
     Json(req): Json<RegisterCompleteRequest>,
 ) -> Result<(CookieJar, Json<serde_json::Value>), StatusCode> {
     // Fetch and delete challenge (single-use)
@@ -285,20 +441,34 @@ async fn register_complete(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let mut jar = jar;
+
     // Set session cookie on first setup
     if context.is_new_user {
+        let secure_cookie = request_secure_cookie(&headers, state.secure_cookies);
         let token = auth::create_token(&state.jwt_secret, &context.user_id)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let cookie = auth::session_cookie(token, state.secure_cookies);
-        return Ok((jar.add(cookie), Json(serde_json::json!({"success": true}))));
+        let cookie = auth::session_cookie(token, secure_cookie);
+        jar = jar.add(cookie);
     }
 
-    Ok((jar, Json(serde_json::json!({"success": true}))))
+    Ok((
+        jar,
+        Json(serde_json::json!({
+            "success": true,
+        })),
+    ))
 }
 
 async fn login_begin(
     State(state): State<AppState>,
+    Json(req): Json<LoginBeginRequest>,
 ) -> Result<Json<BeginResponse<RequestChallengeResponse>>, StatusCode> {
+    let redirect_origin = normalize_redirect_origin(&state, req.redirect_origin.as_deref())?;
+    let redirect_path = redirect_origin
+        .as_ref()
+        .map(|_| normalize_redirect_path(req.redirect_path.as_deref()));
+
     // Clean up expired challenges
     sqlx::query("DELETE FROM auth_challenge WHERE expires_at < datetime('now')")
         .execute(&state.db)
@@ -337,6 +507,8 @@ async fn login_begin(
     let context = AuthenticationContext {
         webauthn_state: auth_state,
         user_id,
+        redirect_origin,
+        redirect_path,
     };
     let state_json =
         serde_json::to_string(&context).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -357,6 +529,7 @@ async fn login_begin(
 async fn login_complete(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Json(req): Json<LoginCompleteRequest>,
 ) -> Result<(CookieJar, Json<serde_json::Value>), StatusCode> {
     // Fetch and delete challenge (single-use)
@@ -406,9 +579,10 @@ async fn login_complete(
     }
 
     // Issue JWT
+    let secure_cookie = request_secure_cookie(&headers, state.secure_cookies);
     let token = auth::create_token(&state.jwt_secret, &context.user_id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let cookie = auth::session_cookie(token, state.secure_cookies);
+    let cookie = auth::session_cookie(token, secure_cookie);
 
     // Get user name
     let user_name: Option<(String,)> = sqlx::query_as("SELECT name FROM user WHERE id = ?")
@@ -417,13 +591,88 @@ async fn login_complete(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let redirect_url = if let Some(target_origin) = context.redirect_origin.as_deref() {
+        let target_path = context
+            .redirect_path
+            .as_deref()
+            .map(str::to_string)
+            .unwrap_or_else(|| "/".to_string());
+        let token =
+            issue_login_redirect_token(&state, &context.user_id, target_origin, &target_path)
+                .await?;
+        Some(redirect_complete_url(target_origin, &token))
+    } else {
+        None
+    };
+
     Ok((
         jar.add(cookie),
         Json(serde_json::json!({
             "success": true,
             "user_name": user_name.map(|u| u.0),
+            "redirect_url": redirect_url,
         })),
     ))
+}
+
+async fn redirect_start(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Json(req): Json<RedirectStartRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let target_origin = normalize_redirect_origin(&state, Some(&req.redirect_origin))?
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let target_path = normalize_redirect_path(req.redirect_path.as_deref());
+    let token =
+        issue_login_redirect_token(&state, &auth.user_id, &target_origin, &target_path).await?;
+
+    Ok(Json(serde_json::json!({
+        "redirect_url": redirect_complete_url(&target_origin, &token),
+    })))
+}
+
+async fn redirect_complete(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<RedirectCompleteQuery>,
+    headers: HeaderMap,
+) -> Result<(CookieJar, Redirect), StatusCode> {
+    let mut validation = Validation::default();
+    validation.validate_aud = false;
+
+    let claims = decode::<LoginRedirectClaims>(
+        &query.token,
+        &DecodingKey::from_secret(&state.jwt_secret),
+        &validation,
+    )
+    .map_err(|_| StatusCode::UNAUTHORIZED)?
+    .claims;
+
+    if !claims.iss.eq_ignore_ascii_case(&state.rp_origin) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let fallback_scheme = if state.rp_origin.starts_with("https://") {
+        "https"
+    } else {
+        "http"
+    };
+    let origin = request_origin(&headers, fallback_scheme).ok_or(StatusCode::BAD_REQUEST)?;
+    if !claims.aud.eq_ignore_ascii_case(&origin) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let aud_host = origin_host(&claims.aud).ok_or(StatusCode::UNAUTHORIZED)?;
+    if !state.allowed_hosts.contains(aud_host.as_str()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let secure_cookie = origin.starts_with("https://");
+    let token = auth::create_token(&state.jwt_secret, &claims.sub)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let cookie = auth::session_cookie(token, secure_cookie);
+    let redirect_path = normalize_redirect_path(Some(&claims.path));
+
+    Ok((jar.add(cookie), Redirect::to(&redirect_path)))
 }
 
 async fn logout(jar: CookieJar) -> CookieJar {
@@ -514,4 +763,30 @@ async fn delete_passkey(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn request_origin_uses_fallback_scheme_when_proto_missing() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("example.com"));
+
+        let origin = request_origin(&headers, "https");
+        assert_eq!(origin.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn normalize_redirect_path_rejects_protocol_relative_and_backslashes() {
+        assert_eq!(normalize_redirect_path(Some("//evil.com")), "/");
+        assert_eq!(normalize_redirect_path(Some("/\\evil.com")), "/");
+    }
+
+    #[test]
+    fn normalize_redirect_path_accepts_regular_relative_path() {
+        assert_eq!(normalize_redirect_path(Some("/dashboard")), "/dashboard");
+    }
 }

@@ -61,6 +61,7 @@ flake.nix          — full build pipeline + dev shell
 | `DATABASE_URL` | `sqlite:den.db?mode=rwc` | SQLite database path              |
 | `RP_ID`        | `localhost`              | WebAuthn relying party ID (domain)|
 | `RP_ORIGIN`    | `http://localhost:3000`  | WebAuthn relying party origin     |
+| `ALLOWED_HOSTS`| (none)                   | Comma-separated extra hosts allowed for auth redirects |
 
 ## Learnings
 

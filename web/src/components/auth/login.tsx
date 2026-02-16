@@ -9,13 +9,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { loginWithPasskey } from "@/lib/webauthn";
+import {
+  loginWithPasskey,
+  type PasskeyAuthResult,
+  type RedirectRequest,
+} from "@/lib/webauthn";
 
 interface LoginProps {
-  onComplete: (userName: string | null) => void | Promise<void>;
+  redirect?: RedirectRequest;
+  onComplete: (result: PasskeyAuthResult) => void | Promise<void>;
 }
 
-export function Login({ onComplete }: LoginProps) {
+export function Login({ onComplete, redirect }: LoginProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -23,8 +28,8 @@ export function Login({ onComplete }: LoginProps) {
     setLoading(true);
     setError(null);
     try {
-      const userName = await loginWithPasskey();
-      await onComplete(userName);
+      const result = await loginWithPasskey(redirect);
+      await onComplete(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed");
     } finally {

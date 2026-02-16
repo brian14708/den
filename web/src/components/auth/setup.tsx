@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { registerPasskey } from "@/lib/webauthn";
 
 interface SetupProps {
-  onComplete: (userName: string) => void;
+  onComplete: (userName: string) => void | Promise<void>;
 }
 
 export function Setup({ onComplete }: SetupProps) {
@@ -29,7 +29,7 @@ export function Setup({ onComplete }: SetupProps) {
     setError(null);
     try {
       await registerPasskey(trimmedName, "initial");
-      onComplete(trimmedName);
+      await onComplete(trimmedName);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Setup failed");
     } finally {

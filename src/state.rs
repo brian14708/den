@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use sqlx::SqlitePool;
@@ -9,4 +10,6 @@ pub struct AppState {
     pub webauthn: Arc<Webauthn>,
     pub jwt_secret: Arc<Vec<u8>>,
     pub secure_cookies: bool,
+    pub rp_origin: String,
+    pub allowed_hosts: Arc<HashSet<String>>,
 }

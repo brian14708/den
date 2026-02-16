@@ -2,6 +2,7 @@ export interface AuthStatus {
   setup_complete: boolean;
   authenticated: boolean;
   user_name: string | null;
+  canonical_origin: string;
 }
 
 interface CachedAuthStatus {
@@ -20,7 +21,8 @@ function isAuthStatus(value: unknown): value is AuthStatus {
   return (
     typeof candidate.setup_complete === "boolean" &&
     typeof candidate.authenticated === "boolean" &&
-    (typeof candidate.user_name === "string" || candidate.user_name === null)
+    (typeof candidate.user_name === "string" || candidate.user_name === null) &&
+    typeof candidate.canonical_origin === "string"
   );
 }
 
@@ -111,18 +113,27 @@ export async function getAuthStatus(options?: {
 }
 
 export function setAuthenticatedAuthStatus(userName: string): void {
+  const current = getCachedAuthStatus();
+  const canonicalOrigin =
+    current?.canonical_origin ??
+    (typeof window !== "undefined" ? window.location.origin : "");
   setCachedAuthStatusInternal({
-    setup_complete: true,
+    setup_complete: current?.setup_complete ?? true,
     authenticated: true,
     user_name: userName,
+    canonical_origin: canonicalOrigin,
   });
 }
 
 export function setLoggedOutAuthStatus(): void {
   const current = getCachedAuthStatus();
+  const canonicalOrigin =
+    current?.canonical_origin ??
+    (typeof window !== "undefined" ? window.location.origin : "");
   setCachedAuthStatusInternal({
     setup_complete: current?.setup_complete ?? true,
     authenticated: false,
     user_name: null,
+    canonical_origin: canonicalOrigin,
   });
 }

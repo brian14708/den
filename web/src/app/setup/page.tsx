@@ -15,6 +15,15 @@ export default function SetupPage() {
     const load = async () => {
       try {
         const status = await getAuthStatus({ force: true });
+        const currentOrigin = window.location.origin;
+        if (
+          currentOrigin.toLowerCase() !== status.canonical_origin.toLowerCase()
+        ) {
+          window.location.assign(
+            new URL("/setup", status.canonical_origin).toString(),
+          );
+          return;
+        }
         if (status.authenticated && status.user_name) {
           router.replace("/");
           return;
@@ -46,7 +55,7 @@ export default function SetupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center">
       <Setup
-        onComplete={(userName) => {
+        onComplete={async (userName) => {
           setAuthenticatedAuthStatus(userName);
           router.replace("/");
         }}

@@ -2,6 +2,20 @@ const DEFAULT_WEBAUTHN_TIMEOUT_MS = 60_000;
 const MIN_WEBAUTHN_TIMEOUT_MS = 5_000;
 const MAX_WEBAUTHN_TIMEOUT_MS = 120_000;
 
+export interface RedirectRequest {
+  redirectOrigin: string;
+  redirectPath?: string | null;
+}
+
+export interface PasskeyAuthResult {
+  userName: string | null;
+  redirectUrl: string | null;
+}
+
+export interface PasskeyRegistrationResult {
+  redirectUrl: string | null;
+}
+
 function base64urlToBuffer(base64url: string): ArrayBuffer {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
   const pad = base64.length % 4;
@@ -115,6 +129,23 @@ function assertPasskeySupport(): void {
   }
 }
 
+function applyRedirectPayload(
+  payload: {
+    redirect_origin?: string;
+    redirect_path?: string;
+  },
+  redirect?: RedirectRequest,
+): void {
+  if (!redirect) return;
+  const redirectOrigin = redirect.redirectOrigin.trim();
+  if (!redirectOrigin) return;
+  payload.redirect_origin = redirectOrigin;
+  const redirectPath = redirect.redirectPath?.trim();
+  if (redirectPath) {
+    payload.redirect_path = redirectPath;
+  }
+}
+
 async function createCredential(
   publicKey: PublicKeyCredentialCreationOptions,
   signal: AbortSignal | undefined,
@@ -175,15 +206,22 @@ async function getCredential(
 export async function registerPasskey(
   userName: string | null,
   passkeyName: string,
-): Promise<void> {
+  redirect?: RedirectRequest,
+): Promise<PasskeyRegistrationResult> {
   assertPasskeySupport();
 
-  const payload: { passkey_name: string; user_name?: string } = {
+  const payload: {
+    passkey_name: string;
+    user_name?: string;
+    redirect_origin?: string;
+    redirect_path?: string;
+  } = {
     passkey_name: passkeyName,
   };
   if (userName && userName.trim()) {
     payload.user_name = userName.trim();
   }
+  applyRedirectPayload(payload, redirect);
 
   const beginRes = await fetch("/api/auth/register/begin", {
     method: "POST",
@@ -247,17 +285,36 @@ export async function registerPasskey(
   });
   if (completeRes.status === 401) throw new Error("Unauthorized");
   if (!completeRes.ok) throw new Error("Registration failed to complete");
+  const completeData = (await completeRes.json()) as RegisterCompleteResponse;
+  return {
+    redirectUrl: completeData.redirect_url ?? null,
+  };
 }
 
 interface LoginCompleteResponse {
   user_name?: string | null;
+  redirect_url?: string | null;
 }
 
-export async function loginWithPasskey(): Promise<string | null> {
+interface RegisterCompleteResponse {
+  redirect_url?: string | null;
+}
+
+export async function loginWithPasskey(
+  redirect?: RedirectRequest,
+): Promise<PasskeyAuthResult> {
   assertPasskeySupport();
+
+  const beginPayload: {
+    redirect_origin?: string;
+    redirect_path?: string;
+  } = {};
+  applyRedirectPayload(beginPayload, redirect);
 
   const beginRes = await fetch("/api/auth/login/begin", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(beginPayload),
   });
   if (!beginRes.ok) throw new Error("Login failed to start");
   const { challenge_id, options } = await beginRes.json();
@@ -313,5 +370,8 @@ export async function loginWithPasskey(): Promise<string | null> {
   });
   if (!completeRes.ok) throw new Error("Login failed to complete");
   const completeData = (await completeRes.json()) as LoginCompleteResponse;
-  return completeData.user_name ?? null;
+  return {
+    userName: completeData.user_name ?? null,
+    redirectUrl: completeData.redirect_url ?? null,
+  };
 }
