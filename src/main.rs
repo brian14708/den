@@ -105,9 +105,7 @@ fn normalize_origin(origin: &str) -> Option<String> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
     }
-    if parsed.host_str().is_none() {
-        return None;
-    }
+    parsed.host_str()?;
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return None;
     }

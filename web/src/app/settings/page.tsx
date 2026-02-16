@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { DeviceLoginQr } from "@/components/device-login-qr";
 import { PasskeyList } from "@/components/passkey-list";
 import { getUnauthorizedRedirectPath } from "@/lib/auth-routing";
 
@@ -26,6 +27,11 @@ export default function SettingsPage() {
         </Link>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
       </div>
+
+      <section className="mb-10">
+        <h2 className="mb-4 text-lg font-semibold">Log In Another Device</h2>
+        <DeviceLoginQr onUnauthorized={handleUnauthorized} />
+      </section>
 
       <section>
         <h2 className="mb-4 text-lg font-semibold">Passkeys</h2>
