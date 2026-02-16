@@ -1,33 +1,58 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Setup } from "@/components/auth/setup";
+import { Login } from "@/components/auth/login";
+import { Dashboard } from "@/components/dashboard";
+
+type AuthState = "loading" | "setup" | "login" | "authenticated";
+
+interface StatusResponse {
+  setup_complete: boolean;
+  authenticated: boolean;
+  user_name: string | null;
+}
 
 export default function Home() {
-  const [health, setHealth] = useState<string | null>(null);
+  const [authState, setAuthState] = useState<AuthState>("loading");
+  const [userName, setUserName] = useState("");
+
+  const checkStatus = async () => {
+    try {
+      const res = await fetch("/api/auth/status");
+      const data: StatusResponse = await res.json();
+      if (data.authenticated && data.user_name) {
+        setUserName(data.user_name);
+        setAuthState("authenticated");
+      } else if (data.setup_complete) {
+        setAuthState("login");
+      } else {
+        setAuthState("setup");
+      }
+    } catch {
+      setAuthState("setup");
+    }
+  };
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((d) => setHealth(d.status))
-      .catch(() => setHealth("unreachable"));
+    checkStatus();
   }, []);
+
+  if (authState === "loading") {
+    return (
+      <main className="flex min-h-screen items-center justify-center">
+        <p className="text-muted-foreground">Loading...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-screen items-center justify-center">
-      <div className="space-y-4 text-center">
-        <h1 className="text-4xl font-bold tracking-tight">den</h1>
-        <p className="text-muted-foreground">personal agent hub</p>
-        {health !== null && (
-          <p className="text-sm text-neutral-500">
-            api:{" "}
-            <span
-              className={health === "ok" ? "text-green-400" : "text-red-400"}
-            >
-              {health}
-            </span>
-          </p>
-        )}
-      </div>
+      {authState === "setup" && <Setup onComplete={checkStatus} />}
+      {authState === "login" && <Login onComplete={checkStatus} />}
+      {authState === "authenticated" && (
+        <Dashboard userName={userName} onLogout={checkStatus} />
+      )}
     </main>
   );
 }

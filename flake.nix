@@ -90,7 +90,13 @@
                   pkgs.nodejs
                   pkgs.pnpm_10
                   pkgs.sqlx-cli
+                  pkgs.openssl
+                  pkgs.pkg-config
                 ];
+                env = {
+                  OPENSSL_DIR = "${pkgs.openssl.dev}";
+                  OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+                };
               };
 
           apps = {
@@ -105,10 +111,19 @@
             inherit frontend;
             default =
               let
+                src = pkgs.lib.cleanSourceWith {
+                  src = ./.;
+                  filter =
+                    path: type:
+                    (craneLib.filterCargoSources path type)
+                    || (type == "directory" && baseNameOf path == "migrations")
+                    || (builtins.match ".*\\.sql$" path != null);
+                };
                 commonArgs = {
-                  inherit pname;
-                  src = craneLib.cleanCargoSource ./.;
+                  inherit pname src;
                   strictDeps = true;
+                  nativeBuildInputs = [ pkgs.pkg-config ];
+                  buildInputs = [ pkgs.openssl ];
                 };
               in
               craneLib.buildPackage (
@@ -119,7 +134,6 @@
                   preBuild = ''
                     mkdir -p web/out
                     cp -r ${frontend}/* web/out/
-                    cp -r ${./migrations} migrations
                   '';
                 }
               );

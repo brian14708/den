@@ -1,7 +1,9 @@
 /target
 /result
-web/node_modules
-web/.next
-web/out
-den.db
-den.db-*
+/web/node_modules
+/web/.next
+/web/out
+/web/*.tsbuildinfo
+/den.db
+/den.db-*
+/.workspaces

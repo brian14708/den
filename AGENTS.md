@@ -24,13 +24,17 @@ cd web && pnpm fmt                      # format frontend
 ## Layout
 
 ```
-src/main.rs        — axum server, router
+src/main.rs        — axum server, router, WebAuthn + JWT init
 src/api/mod.rs     — API router (/api/*)
 src/api/health.rs  — GET /api/health
-src/state.rs       — AppState (holds SqlitePool)
+src/api/auth.rs    — passkey auth endpoints (/api/auth/*)
+src/auth.rs        — JWT claims, AuthUser/MaybeAuthUser extractors
+src/state.rs       — AppState (SqlitePool, Webauthn, JWT secret)
 src/frontend.rs    — rust-embed static serving + SPA fallback
 migrations/        — sqlx migrations (run automatically on startup)
 web/src/app/       — Next.js App Router pages
+web/src/lib/       — shared utilities (webauthn browser helpers)
+web/src/components/ — React components (auth/, ui/)
 build.rs           — creates empty web/out/ so rust-embed compiles without frontend
 flake.nix          — full build pipeline + dev shell
 ```
@@ -54,6 +58,8 @@ flake.nix          — full build pipeline + dev shell
 | `PORT`         | `3000`                   | Server listen port                |
 | `RUST_LOG`     | (none)                   | Tracing filter (e.g. `den=debug`) |
 | `DATABASE_URL` | `sqlite:den.db?mode=rwc` | SQLite database path              |
+| `RP_ID`        | `localhost`              | WebAuthn relying party ID (domain)|
+| `RP_ORIGIN`    | `http://localhost:3000`  | WebAuthn relying party origin     |
 
 ## Learnings
 
