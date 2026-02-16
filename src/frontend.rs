@@ -8,6 +8,7 @@ struct Assets;
 
 pub async fn handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
+    let path = path.trim_end_matches('/');
 
     // Exact file match (JS, CSS, images, etc.)
     if let Some(file) = Assets::get(path) {
@@ -20,8 +21,15 @@ pub async fn handler(uri: Uri) -> Response {
             .into_response();
     }
 
-    // Try .html extension
+    // Try .html extension (e.g. /settings -> settings.html)
     if let Some(file) = Assets::get(&format!("{path}.html")) {
+        return Html(file.data).into_response();
+    }
+
+    // Try index.html in subdirectory (e.g. /foo/ -> foo/index.html)
+    if !path.is_empty()
+        && let Some(file) = Assets::get(&format!("{path}/index.html"))
+    {
         return Html(file.data).into_response();
     }
 

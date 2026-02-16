@@ -15,7 +15,6 @@ pub struct Claims {
     pub exp: i64,
 }
 
-#[expect(dead_code)]
 pub struct AuthUser {
     pub user_id: String,
 }

@@ -1,13 +1,13 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
-use crate::auth::{self, MaybeAuthUser};
+use crate::auth::{self, AuthUser, MaybeAuthUser};
 use crate::state::AppState;
 
 // --- Types ---
@@ -58,6 +58,19 @@ struct AuthenticationContext {
     user_id: String,
 }
 
+#[derive(Serialize)]
+struct PasskeyInfo {
+    id: i64,
+    name: String,
+    created: String,
+    last_used: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RenameRequest {
+    name: String,
+}
+
 // --- Router ---
 
 pub fn router() -> Router<AppState> {
@@ -68,6 +81,9 @@ pub fn router() -> Router<AppState> {
         .route("/auth/login/begin", post(login_begin))
         .route("/auth/login/complete", post(login_complete))
         .route("/auth/logout", post(logout))
+        .route("/auth/passkeys", get(list_passkeys))
+        .route("/auth/passkeys/{id}/name", patch(rename_passkey))
+        .route("/auth/passkeys/{id}", delete(delete_passkey))
 }
 
 // --- Handlers ---
@@ -388,4 +404,85 @@ async fn logout(jar: CookieJar) -> CookieJar {
             .max_age(time::Duration::ZERO)
             .build(),
     )
+}
+
+async fn list_passkeys(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<Vec<PasskeyInfo>>, StatusCode> {
+    let rows: Vec<(i64, String, String, Option<String>)> =
+        sqlx::query_as("SELECT id, name, created, last_used FROM passkey WHERE user_id = ?")
+            .bind(&auth.user_id)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let passkeys = rows
+        .into_iter()
+        .map(|(id, name, created, last_used)| PasskeyInfo {
+            id,
+            name,
+            created,
+            last_used,
+        })
+        .collect();
+
+    Ok(Json(passkeys))
+}
+
+async fn rename_passkey(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<i64>,
+    Json(req): Json<RenameRequest>,
+) -> Result<StatusCode, StatusCode> {
+    let result = sqlx::query("UPDATE passkey SET name = ? WHERE id = ? AND user_id = ?")
+        .bind(&req.name)
+        .bind(id)
+        .bind(&auth.user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if result.rows_affected() == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_passkey(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, StatusCode> {
+    let result = sqlx::query(
+        "DELETE FROM passkey WHERE id = ? AND user_id = ? \
+         AND (SELECT COUNT(*) FROM passkey WHERE user_id = ?) > 1",
+    )
+    .bind(id)
+    .bind(&auth.user_id)
+    .bind(&auth.user_id)
+    .execute(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if result.rows_affected() == 0 {
+        // Distinguish "not found" from "last passkey" for the client
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM passkey WHERE id = ? AND user_id = ?)")
+                .bind(id)
+                .bind(&auth.user_id)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        return Err(if exists {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::NOT_FOUND
+        });
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
