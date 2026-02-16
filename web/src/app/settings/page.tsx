@@ -1,20 +1,18 @@
 "use client";
 
 import { useCallback } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DeviceLoginQr } from "@/components/device-login-qr";
 import { PasskeyList } from "@/components/passkey-list";
 import { getUnauthorizedRedirectPath } from "@/lib/auth-routing";
 
 export default function SettingsPage() {
-  const router = useRouter();
   const handleUnauthorized = useCallback(() => {
     void (async () => {
       const path = await getUnauthorizedRedirectPath();
-      router.replace(path);
+      window.location.replace(path);
     })();
-  }, [router]);
+  }, []);
 
   return (
     <main className="mx-auto max-w-lg px-4 py-12">

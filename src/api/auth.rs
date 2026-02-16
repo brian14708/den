@@ -1,18 +1,18 @@
-use axum::extract::{Extension, Path, Query, State};
-use axum::http::{HeaderMap, Request, StatusCode, header};
-use axum::middleware::{Next, from_fn_with_state};
-use axum::response::{Redirect, Response};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Redirect;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
-use url::{Url, form_urlencoded};
+use url::form_urlencoded;
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
 use crate::auth::{self, AuthUser, MaybeAuthUser};
+use crate::origin::{normalize_origin, origin_host, request_fallback_scheme, request_origin};
 use crate::state::AppState;
 
 // --- Types ---
@@ -100,13 +100,7 @@ struct RedirectStartRequest {
 
 // --- Router ---
 
-pub fn router(state: AppState) -> Router<AppState> {
-    let protected_routes = Router::new()
-        .route("/auth/passkeys", get(list_passkeys))
-        .route("/auth/passkeys/{id}/name", patch(rename_passkey))
-        .route("/auth/passkeys/{id}", delete(delete_passkey))
-        .route_layer(from_fn_with_state(state, require_auth));
-
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/register/begin", post(register_begin))
         .route("/auth/register/complete", post(register_complete))
@@ -115,62 +109,18 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/auth/redirect/start", post(redirect_start))
         .route("/auth/redirect/complete", get(redirect_complete))
         .route("/auth/logout", post(logout))
-        .merge(protected_routes)
+        .route("/auth/passkeys", get(list_passkeys))
+        .route("/auth/passkeys/{id}/name", patch(rename_passkey))
+        .route("/auth/passkeys/{id}", delete(delete_passkey))
 }
 
 // --- Handlers ---
-
-fn request_origin(headers: &HeaderMap, fallback_scheme: &str) -> Option<String> {
-    let proto = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or(fallback_scheme);
-
-    let host = headers
-        .get("x-forwarded-host")
-        .or_else(|| headers.get(header::HOST))
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())?;
-
-    Some(format!("{proto}://{host}"))
-}
 
 fn request_secure_cookie(headers: &HeaderMap, fallback: bool) -> bool {
     let fallback_scheme = if fallback { "https" } else { "http" };
     request_origin(headers, fallback_scheme)
         .map(|origin| origin.starts_with("https://"))
         .unwrap_or(fallback)
-}
-
-fn normalize_origin(origin: &str) -> Option<String> {
-    let parsed = Url::parse(origin).ok()?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return None;
-    }
-    parsed.host_str()?;
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return None;
-    }
-    Some(parsed.origin().ascii_serialization())
-}
-
-fn host_with_port(url: &Url) -> Option<String> {
-    let host = url.host_str()?.to_ascii_lowercase();
-    Some(match url.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host,
-    })
-}
-
-fn origin_host(origin: &str) -> Option<String> {
-    let origin = normalize_origin(origin)?;
-    let parsed = Url::parse(&origin).ok()?;
-    host_with_port(&parsed)
 }
 
 fn normalize_redirect_origin(
@@ -223,7 +173,7 @@ fn redirect_complete_url(target_origin: &str, token: &str) -> String {
     )
 }
 
-async fn issue_login_redirect_token(
+fn issue_login_redirect_token(
     state: &AppState,
     user_id: &str,
     target_origin: &str,
@@ -247,19 +197,6 @@ async fn issue_login_redirect_token(
         &EncodingKey::from_secret(&state.jwt_secret),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-}
-
-async fn require_auth(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    mut request: Request<axum::body::Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let cookie = jar.get("den_session").ok_or(StatusCode::UNAUTHORIZED)?;
-    let user_id = auth::user_id_from_token(&state.jwt_secret, cookie.value())
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
-    request.extensions_mut().insert(AuthUser { user_id });
-    Ok(next.run(request).await)
 }
 
 async fn register_begin(
@@ -575,8 +512,7 @@ async fn login_complete(
             .map(str::to_string)
             .unwrap_or_else(|| "/".to_string());
         let token =
-            issue_login_redirect_token(&state, &context.user_id, target_origin, &target_path)
-                .await?;
+            issue_login_redirect_token(&state, &context.user_id, target_origin, &target_path)?;
         Some(redirect_complete_url(target_origin, &token))
     } else {
         None
@@ -599,8 +535,7 @@ async fn redirect_start(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let target_origin = normalize_redirect_target_origin(&state, &req.redirect_origin)?;
     let target_path = normalize_redirect_path(req.redirect_path.as_deref());
-    let token =
-        issue_login_redirect_token(&state, &auth.user_id, &target_origin, &target_path).await?;
+    let token = issue_login_redirect_token(&state, &auth.user_id, &target_origin, &target_path)?;
 
     Ok(Json(serde_json::json!({
         "redirect_url": redirect_complete_url(&target_origin, &token),
@@ -628,11 +563,7 @@ async fn redirect_complete(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let fallback_scheme = if state.rp_origin.starts_with("https://") {
-        "https"
-    } else {
-        "http"
-    };
+    let fallback_scheme = request_fallback_scheme(&headers, &state.rp_origin);
     let origin = request_origin(&headers, fallback_scheme).ok_or(StatusCode::BAD_REQUEST)?;
     if !claims.aud.eq_ignore_ascii_case(&origin) {
         return Err(StatusCode::UNAUTHORIZED);
@@ -662,7 +593,7 @@ async fn logout(jar: CookieJar) -> CookieJar {
 
 async fn list_passkeys(
     State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
+    auth: AuthUser,
 ) -> Result<Json<Vec<PasskeyInfo>>, StatusCode> {
     let rows: Vec<(i64, String, String, Option<String>)> =
         sqlx::query_as("SELECT id, name, created, last_used FROM passkey WHERE user_id = ?")
@@ -686,7 +617,7 @@ async fn list_passkeys(
 
 async fn rename_passkey(
     State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
+    auth: AuthUser,
     Path(id): Path<i64>,
     Json(req): Json<RenameRequest>,
 ) -> Result<StatusCode, StatusCode> {
@@ -707,7 +638,7 @@ async fn rename_passkey(
 
 async fn delete_passkey(
     State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
+    auth: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
     let result = sqlx::query(
@@ -744,16 +675,6 @@ async fn delete_passkey(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::HeaderValue;
-
-    #[test]
-    fn request_origin_uses_fallback_scheme_when_proto_missing() {
-        let mut headers = HeaderMap::new();
-        headers.insert(header::HOST, HeaderValue::from_static("example.com"));
-
-        let origin = request_origin(&headers, "https");
-        assert_eq!(origin.as_deref(), Some("https://example.com"));
-    }
 
     #[test]
     fn normalize_redirect_path_rejects_protocol_relative_and_backslashes() {

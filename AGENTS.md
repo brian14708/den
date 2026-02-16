@@ -26,10 +26,13 @@ cd web && pnpm lint                     # eslint frontend
 
 ```
 src/main.rs        — axum server, router, WebAuthn + JWT init
+src/config.rs      — config.toml defaults + loading from XDG paths
 src/api/mod.rs     — API router (/api/*)
 src/api/health.rs  — GET /api/health
 src/api/auth.rs    — passkey auth endpoints (/api/auth/*)
 src/auth.rs        — JWT claims, AuthUser/MaybeAuthUser extractors
+src/origin.rs      — shared origin/header parsing + allowed host normalization
+src/middleware.rs  — cross-cutting HTTP middleware (canonical auth-origin redirects)
 src/state.rs       — AppState (SqlitePool, Webauthn, JWT secret)
 src/frontend.rs    — rust-embed static serving + SPA fallback
 migrations/        — sqlx migrations (run automatically on startup)
@@ -79,3 +82,5 @@ Record architectural decisions, gotchas, and preferences here as they arise.
 - Run Rust/JS formatters directly instead of relying on a combined formatter command
 - QR device login uses `/api/auth/redirect/start` to mint short-lived links and now accepts canonical `rp_origin` as a valid redirect target
 - `jsonwebtoken` v10 requires exactly one crypto provider feature; set `features = ["rust_crypto"]` (or `["aws_lc_rs"]`) to avoid runtime `CryptoProvider` panics
+- Keep origin/host canonicalization in `src/origin.rs`; reuse it from middleware and auth handlers to avoid drift
+- Prefer `AuthUser` extractor on protected handlers over route middleware that injects auth extensions

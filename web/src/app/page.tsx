@@ -1,18 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Dashboard } from "@/components/dashboard";
 import { getAuthStatus } from "@/lib/auth-status";
 import { authRedirectPathForSetup } from "@/lib/auth-routing";
 
 export default function Home() {
-  const router = useRouter();
   const [ready, setReady] = useState(false);
 
   const handleLogout = useCallback(() => {
-    router.replace("/login");
-  }, [router]);
+    window.location.replace("/login");
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -22,13 +20,13 @@ export default function Home() {
           setReady(true);
           return;
         }
-        router.replace(authRedirectPathForSetup(status.setup_complete));
+        window.location.replace(authRedirectPathForSetup(status.setup_complete));
       } catch {
-        router.replace("/setup");
+        window.location.replace("/setup");
       }
     };
     void load();
-  }, [router]);
+  }, []);
 
   if (!ready) {
     return (

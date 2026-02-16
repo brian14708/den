@@ -7,7 +7,7 @@ use rust_embed::Embed;
 struct Assets;
 
 const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
-const CACHE_CONTROL_DEFAULT: &str = "public, max-age=1800";
+const CACHE_CONTROL_DEFAULT: &str = "public, max-age=60";
 
 fn cache_control_for_path(path: &str) -> &'static str {
     if path.starts_with("_next/static/") {
@@ -76,5 +76,24 @@ pub async fn handler(uri: Uri) -> Response {
         )
             .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_static_assets_are_immutable() {
+        assert_eq!(
+            cache_control_for_path("_next/static/chunks/app.js"),
+            CACHE_CONTROL_IMMUTABLE
+        );
+    }
+
+    #[test]
+    fn non_next_assets_use_short_cache() {
+        assert_eq!(cache_control_for_path("index.html"), CACHE_CONTROL_DEFAULT);
+        assert_eq!(CACHE_CONTROL_DEFAULT, "public, max-age=60");
     }
 }
