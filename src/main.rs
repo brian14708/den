@@ -4,6 +4,7 @@ mod frontend;
 mod state;
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -11,27 +12,80 @@ use axum::extract::State;
 use axum::http::{HeaderMap, Request, header};
 use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Redirect, Response};
+use serde::Deserialize;
 use state::AppState;
 use tower_http::compression::CompressionLayer;
+use tracing_subscriber::EnvFilter;
 use url::{Url, form_urlencoded};
 use webauthn_rs::prelude::*;
+use xdg::BaseDirectories;
+
+const DEFAULT_PORT: u16 = 3000;
+const DEFAULT_RUST_LOG: &str = "info";
+const DEFAULT_RP_ID: &str = "localhost";
+const DEFAULT_RP_ORIGIN: &str = "http://localhost:3000";
+
+#[derive(Debug, Deserialize, Default)]
+struct FileConfig {
+    port: Option<u16>,
+    rust_log: Option<String>,
+    rp_id: Option<String>,
+    rp_origin: Option<String>,
+    allowed_hosts: Option<Vec<String>>,
+    database_path: Option<String>,
+}
+
+#[derive(Debug)]
+struct AppConfig {
+    port: u16,
+    rust_log: String,
+    rp_id: String,
+    rp_origin: String,
+    allowed_hosts: Vec<String>,
+    database_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct DenPaths {
+    config_path: PathBuf,
+    default_database_path: PathBuf,
+}
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    let AppConfig {
+        port,
+        rust_log,
+        rp_id,
+        rp_origin,
+        allowed_hosts: configured_allowed_hosts,
+        database_path,
+    } = load_app_config();
 
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:den.db?mode=rwc".into());
+    let env_filter = EnvFilter::try_new(&rust_log).unwrap_or_else(|_| {
+        eprintln!("invalid rust_log value in config, falling back to '{DEFAULT_RUST_LOG}'");
+        EnvFilter::new(DEFAULT_RUST_LOG)
+    });
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+
+    let db_dir = database_path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(db_dir).unwrap_or_else(|error| {
+        panic!(
+            "failed to create data directory at {}: {error}",
+            db_dir.display()
+        )
+    });
+
+    let db_url = sqlite_url_for_path(&database_path);
     let db = sqlx::SqlitePool::connect(&db_url).await.unwrap();
     sqlx::migrate!().run(&db).await.unwrap();
     tracing::info!("database ready");
 
     // Initialize WebAuthn
-    let rp_id = std::env::var("RP_ID").unwrap_or_else(|_| "localhost".into());
-    let rp_origin = std::env::var("RP_ORIGIN").unwrap_or_else(|_| "http://localhost:3000".into());
     let secure_cookies = rp_origin.starts_with("https://");
-    let rp_origin_url = Url::parse(&rp_origin).expect("invalid RP_ORIGIN");
+    let rp_origin_url = Url::parse(&rp_origin).expect("invalid rp_origin in config");
     let rp_origin = rp_origin_url.origin().ascii_serialization();
-    let allowed_hosts = load_allowed_hosts(&rp_origin);
+    let allowed_hosts = load_allowed_hosts(&rp_origin, &configured_allowed_hosts);
 
     let webauthn = WebauthnBuilder::new(&rp_id, &rp_origin_url)
         .expect("failed to create WebauthnBuilder")
@@ -61,12 +115,107 @@ async fn main() {
         .layer(CompressionLayer::new())
         .with_state(state);
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".into());
     let addr = format!("[::]:{port}");
     tracing::info!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+fn non_empty_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_den_paths() -> DenPaths {
+    let xdg = BaseDirectories::with_prefix("den")
+        .unwrap_or_else(|error| panic!("failed to resolve XDG directories: {error}"));
+    let config_path = xdg
+        .place_config_file("config.toml")
+        .unwrap_or_else(|error| panic!("failed to prepare config path: {error}"));
+    let default_database_path = xdg.get_data_home().join("den.db");
+
+    DenPaths {
+        config_path,
+        default_database_path,
+    }
+}
+
+fn sqlite_url_for_path(database_path: &Path) -> String {
+    format!("sqlite:{}?mode=rwc", database_path.display())
+}
+
+fn default_config_contents() -> String {
+    format!(
+        "port = {DEFAULT_PORT}\n\
+rust_log = \"{DEFAULT_RUST_LOG}\"\n\
+rp_id = \"{DEFAULT_RP_ID}\"\n\
+rp_origin = \"{DEFAULT_RP_ORIGIN}\"\n\
+allowed_hosts = []\n"
+    )
+}
+
+fn ensure_config_file(config_path: &Path) {
+    let parent = config_path
+        .parent()
+        .expect("config path must have a parent directory");
+    std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+        panic!(
+            "failed to create config directory at {}: {error}",
+            parent.display()
+        )
+    });
+    if config_path.exists() {
+        return;
+    }
+
+    std::fs::write(config_path, default_config_contents()).unwrap_or_else(|error| {
+        panic!(
+            "failed to write default config file at {}: {error}",
+            config_path.display()
+        )
+    });
+}
+
+fn read_file_config(config_path: &Path) -> FileConfig {
+    let contents = std::fs::read_to_string(config_path).unwrap_or_else(|error| {
+        panic!(
+            "failed to read config file at {}: {error}",
+            config_path.display()
+        )
+    });
+    toml::from_str(&contents).unwrap_or_else(|error| {
+        panic!(
+            "invalid TOML in config file at {}: {error}",
+            config_path.display()
+        )
+    })
+}
+
+fn load_app_config() -> AppConfig {
+    let den_paths = resolve_den_paths();
+    ensure_config_file(&den_paths.config_path);
+    let file = read_file_config(&den_paths.config_path);
+
+    let allowed_hosts = file
+        .allowed_hosts
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    AppConfig {
+        port: file.port.unwrap_or(DEFAULT_PORT),
+        rust_log: non_empty_string(file.rust_log).unwrap_or_else(|| DEFAULT_RUST_LOG.to_owned()),
+        rp_id: non_empty_string(file.rp_id).unwrap_or_else(|| DEFAULT_RP_ID.to_owned()),
+        rp_origin: non_empty_string(file.rp_origin).unwrap_or_else(|| DEFAULT_RP_ORIGIN.to_owned()),
+        allowed_hosts,
+        database_path: non_empty_string(file.database_path)
+            .map(PathBuf::from)
+            .unwrap_or(den_paths.default_database_path),
+    }
 }
 
 fn path_matches(path: &str, route: &str) -> bool {
@@ -142,17 +291,12 @@ fn normalize_host(candidate: &str) -> Option<String> {
     host_with_port(&parsed)
 }
 
-fn load_allowed_hosts(rp_origin: &str) -> HashSet<String> {
+fn load_allowed_hosts(rp_origin: &str, configured_hosts: &[String]) -> HashSet<String> {
     let mut hosts = HashSet::new();
     if let Some(host) = origin_host(rp_origin) {
         hosts.insert(host);
     }
-    let configured = std::env::var("ALLOWED_HOSTS").unwrap_or_default();
-    for candidate in configured
-        .split(',')
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
+    for candidate in configured_hosts {
         if let Some(normalized) = normalize_host(candidate) {
             hosts.insert(normalized);
         } else {
@@ -282,5 +426,11 @@ mod tests {
 
         let origin = request_origin(&headers, "http");
         assert_eq!(origin.as_deref(), Some("https://proxy.example"));
+    }
+
+    #[test]
+    fn default_config_does_not_hardcode_database_path() {
+        let config = default_config_contents();
+        assert!(!config.contains("database_path"));
     }
 }

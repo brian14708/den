@@ -4,6 +4,4 @@
 /web/.next
 /web/out
 /web/*.tsbuildinfo
-/den.db
-/den.db-*
 /.workspaces

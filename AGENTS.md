@@ -52,16 +52,19 @@ flake.nix          — full build pipeline + dev shell
 - Git: conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), lowercase, imperative, no period
 - Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm lint && pnpm fmt && pnpm build`
 
-## Environment
+## Configuration
 
-| Variable       | Default                  | Description                       |
-| -------------- | ------------------------ | --------------------------------- |
-| `PORT`         | `3000`                   | Server listen port                |
-| `RUST_LOG`     | (none)                   | Tracing filter (e.g. `den=debug`) |
-| `DATABASE_URL` | `sqlite:den.db?mode=rwc` | SQLite database path              |
-| `RP_ID`        | `localhost`              | WebAuthn relying party ID (domain)|
-| `RP_ORIGIN`    | `http://localhost:3000`  | WebAuthn relying party origin     |
-| `ALLOWED_HOSTS`| (none)                   | Comma-separated extra hosts allowed for auth redirects |
+Runtime config is loaded from `${XDG_CONFIG_HOME:-~/.config}/den/config.toml`.
+
+```toml
+port = 3000
+rust_log = "info"
+rp_id = "localhost"
+rp_origin = "http://localhost:3000"
+allowed_hosts = []
+# Optional: override path; default is ${XDG_DATA_HOME:-$HOME/.local/share}/den/den.db
+# database_path = "/path/to/den.db"
+```
 
 ## Learnings
 
@@ -74,4 +77,5 @@ Record architectural decisions, gotchas, and preferences here as they arise.
 - sqlx migrations: add numbered SQL files in `migrations/` (e.g. `0002_widgets.sql`), they run automatically on startup
 - nix build uses `SQLX_OFFLINE=true` — after changing queries, run `cargo sqlx prepare` to update `.sqlx/` cache
 - Run Rust/JS formatters directly instead of relying on a combined formatter command
-- QR device login uses `/api/auth/redirect/start` to mint short-lived links and now accepts canonical `RP_ORIGIN` as a valid redirect target
+- QR device login uses `/api/auth/redirect/start` to mint short-lived links and now accepts canonical `rp_origin` as a valid redirect target
+- Runtime config/data paths are resolved with `xdg::BaseDirectories` (`with_prefix("den")`)

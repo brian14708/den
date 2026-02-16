@@ -102,7 +102,7 @@ function passkeyError(
         return new Error("This passkey is already registered on this device.");
       case "SecurityError":
         return new Error(
-          "Passkey failed security checks. Verify RP_ID and RP_ORIGIN for this domain.",
+          "Passkey failed security checks. Verify rp_id and rp_origin in ${XDG_CONFIG_HOME:-~/.config}/den/config.toml.",
         );
       case "NotSupportedError":
         return new Error(
