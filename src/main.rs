@@ -23,7 +23,7 @@ async fn main() {
         .with_state(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".into());
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("[::]:{port}");
     tracing::info!("listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
