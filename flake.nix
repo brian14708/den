@@ -130,7 +130,6 @@
                 commonArgs
                 // {
                   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-                  env.SQLX_OFFLINE = "true";
                   preBuild = ''
                     mkdir -p web/out
                     cp -r ${frontend}/* web/out/
