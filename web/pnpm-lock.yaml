@@ -45,6 +45,12 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
+      prettier:
+        specifier: ^3.8.1
+        version: 3.8.1
+      prettier-plugin-tailwindcss:
+        specifier: ^0.7.2
+        version: 0.7.2(prettier@3.8.1)
       shadcn:
         specifier: ^3.8.4
         version: 3.8.4(@types/node@25.2.3)(typescript@5.9.3)
