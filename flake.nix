@@ -96,6 +96,7 @@
                 packages = [
                   pkgs.nodejs
                   pkgs.pnpm_10
+                  pkgs.sqlx-cli
                 ];
               };
 
@@ -132,9 +133,11 @@
                 commonArgs
                 // {
                   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+                  env.SQLX_OFFLINE = "true";
                   preBuild = ''
                     mkdir -p web/out
                     cp -r ${frontend}/* web/out/
+                    cp -r ${./migrations} migrations
                   '';
                 }
               );

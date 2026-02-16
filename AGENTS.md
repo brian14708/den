@@ -26,7 +26,9 @@ nix fmt                                 # format everything
 src/main.rs        — axum server, router
 src/api/mod.rs     — API router (/api/*)
 src/api/health.rs  — GET /api/health
+src/state.rs       — AppState (holds SqlitePool)
 src/frontend.rs    — rust-embed static serving + SPA fallback
+migrations/        — sqlx migrations (run automatically on startup)
 web/src/app/       — Next.js App Router pages
 build.rs           — creates empty web/out/ so rust-embed compiles without frontend
 flake.nix          — full build pipeline + dev shell + formatting
@@ -46,10 +48,11 @@ flake.nix          — full build pipeline + dev shell + formatting
 
 ## Environment
 
-| Variable   | Default | Description                      |
-|------------|---------|----------------------------------|
-| `PORT`     | `3000`  | Server listen port               |
-| `RUST_LOG` | (none)  | Tracing filter (e.g. `den=debug`) |
+| Variable       | Default                  | Description                       |
+| -------------- | ------------------------ | --------------------------------- |
+| `PORT`         | `3000`                   | Server listen port                |
+| `RUST_LOG`     | (none)                   | Tracing filter (e.g. `den=debug`) |
+| `DATABASE_URL` | `sqlite:den.db?mode=rwc` | SQLite database path              |
 
 ## Learnings
 
@@ -59,3 +62,5 @@ Record architectural decisions, gotchas, and preferences here as they arise.
 - pnpm in nix: use top-level `pkgs.fetchPnpmDeps` + `pkgs.pnpmConfigHook`, not `pnpm_10.fetchDeps` (deprecated); `fetcherVersion = 3` required
 - crane `cleanCargoSource` strips non-Rust files — frontend copied via `preBuild` in `buildPackage`
 - `build.rs` creates empty `web/out/` so the project compiles even without a frontend build
+- sqlx migrations: add numbered SQL files in `migrations/` (e.g. `0002_widgets.sql`), they run automatically on startup
+- nix build uses `SQLX_OFFLINE=true` — after changing queries, run `cargo sqlx prepare` to update `.sqlx/` cache
