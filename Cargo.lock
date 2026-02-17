@@ -441,7 +441,6 @@ dependencies = [
  "axum",
  "axum-extra",
  "jsonwebtoken",
- "mime_guess",
  "rand 0.10.0",
  "serde",
  "serde_json",
