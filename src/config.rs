@@ -35,24 +35,20 @@ struct DenPaths {
 }
 
 fn non_empty_string(value: Option<String>) -> Option<String> {
-    value
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+    let s = value?.trim().to_owned();
+    (!s.is_empty()).then_some(s)
 }
 
 fn resolve_den_paths() -> DenPaths {
     let xdg = BaseDirectories::with_prefix("den");
-    let config_path = xdg
-        .place_config_file("config.toml")
-        .unwrap_or_else(|error| panic!("failed to prepare config path: {error}"));
-    let default_database_path = xdg
-        .get_data_home()
-        .expect("XDG data home is not available")
-        .join("den.db");
-
     DenPaths {
-        config_path,
-        default_database_path,
+        config_path: xdg
+            .place_config_file("config.toml")
+            .unwrap_or_else(|e| panic!("failed to prepare config path: {e}")),
+        default_database_path: xdg
+            .get_data_home()
+            .expect("XDG data home is not available")
+            .join("den.db"),
     }
 }
 
@@ -69,35 +65,34 @@ allowed_hosts = []\n"
 fn ensure_config_file(config_path: &Path) {
     let parent = config_path
         .parent()
-        .expect("config path must have a parent directory");
-    std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+        .expect("config path must have a parent");
+    std::fs::create_dir_all(parent).unwrap_or_else(|e| {
         panic!(
-            "failed to create config directory at {}: {error}",
+            "failed to create config directory at {}: {e}",
             parent.display()
         )
     });
     if config_path.exists() {
         return;
     }
-
-    std::fs::write(config_path, default_config_contents()).unwrap_or_else(|error| {
+    std::fs::write(config_path, default_config_contents()).unwrap_or_else(|e| {
         panic!(
-            "failed to write default config file at {}: {error}",
+            "failed to write default config file at {}: {e}",
             config_path.display()
         )
     });
 }
 
 fn read_file_config(config_path: &Path) -> FileConfig {
-    let contents = std::fs::read_to_string(config_path).unwrap_or_else(|error| {
+    let contents = std::fs::read_to_string(config_path).unwrap_or_else(|e| {
         panic!(
-            "failed to read config file at {}: {error}",
+            "failed to read config file at {}: {e}",
             config_path.display()
         )
     });
-    toml::from_str(&contents).unwrap_or_else(|error| {
+    toml::from_str(&contents).unwrap_or_else(|e| {
         panic!(
-            "invalid TOML in config file at {}: {error}",
+            "invalid TOML in config file at {}: {e}",
             config_path.display()
         )
     })

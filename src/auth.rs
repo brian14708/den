@@ -36,34 +36,26 @@ pub fn create_token(secret: &[u8], user_id: &str) -> Result<String, jsonwebtoken
     )
 }
 
-fn validate_token(secret: &[u8], token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret),
-        &Validation::default(),
-    )?;
-    Ok(data.claims)
-}
-
 pub fn user_id_from_token(
     secret: &[u8],
     token: &str,
 ) -> Result<String, jsonwebtoken::errors::Error> {
-    Ok(validate_token(secret, token)?.sub)
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret),
+        &Validation::default(),
+    )
+    .map(|d| d.claims.sub)
 }
 
 pub fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
-    let builder = Cookie::build(("den_session", token))
+    Cookie::build(("den_session", token))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Strict)
-        .max_age(Duration::days(7));
-    let builder = if secure {
-        builder.secure(true)
-    } else {
-        builder
-    };
-    builder.build()
+        .max_age(Duration::days(7))
+        .secure(secure)
+        .build()
 }
 
 impl FromRequestParts<AppState> for AuthUser {

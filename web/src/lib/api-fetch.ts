@@ -11,21 +11,18 @@ interface ApiFetchOptions extends RequestInit {
   redirectOnUnauthorized?: boolean;
 }
 
-let unauthorizedRedirectPromise: Promise<void> | null = null;
+let redirectPromise: Promise<void> | null = null;
 
 async function redirectForUnauthorized(): Promise<void> {
   if (typeof window === "undefined") return;
-
-  if (!unauthorizedRedirectPromise) {
-    unauthorizedRedirectPromise = (async () => {
-      const path = await getUnauthorizedRedirectPath();
-      window.location.replace(path);
-    })().finally(() => {
-      unauthorizedRedirectPromise = null;
-    });
+  if (!redirectPromise) {
+    redirectPromise = getUnauthorizedRedirectPath()
+      .then((p) => window.location.replace(p))
+      .finally(() => {
+        redirectPromise = null;
+      });
   }
-
-  await unauthorizedRedirectPromise;
+  await redirectPromise;
 }
 
 export async function apiFetch(
@@ -41,6 +38,8 @@ export async function apiFetch(
   return res;
 }
 
-export function isUnauthorizedError(error: unknown): error is UnauthorizedError {
+export function isUnauthorizedError(
+  error: unknown,
+): error is UnauthorizedError {
   return error instanceof UnauthorizedError;
 }

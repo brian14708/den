@@ -7,7 +7,6 @@ use axum_extra::extract::cookie::{Cookie, CookieJar};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
-use url::form_urlencoded;
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
@@ -117,10 +116,8 @@ pub fn router() -> Router<AppState> {
 // --- Handlers ---
 
 fn request_secure_cookie(headers: &HeaderMap, fallback: bool) -> bool {
-    let fallback_scheme = if fallback { "https" } else { "http" };
-    request_origin(headers, fallback_scheme)
-        .map(|origin| origin.starts_with("https://"))
-        .unwrap_or(fallback)
+    let scheme = if fallback { "https" } else { "http" };
+    request_origin(headers, scheme).map_or(fallback, |o| o.starts_with("https://"))
 }
 
 fn normalize_redirect_origin(
@@ -135,7 +132,7 @@ fn normalize_redirect_origin(
         return Ok(None);
     }
     let host = origin_host(&normalized).ok_or(StatusCode::BAD_REQUEST)?;
-    if !state.allowed_hosts.contains(host.as_str()) {
+    if !state.allowed_hosts.contains(&host) {
         return Err(StatusCode::BAD_REQUEST);
     }
     Ok(Some(normalized))
@@ -147,53 +144,40 @@ fn normalize_redirect_target_origin(state: &AppState, origin: &str) -> Result<St
         return Ok(state.rp_origin.clone());
     }
     let host = origin_host(&normalized).ok_or(StatusCode::BAD_REQUEST)?;
-    if !state.allowed_hosts.contains(host.as_str()) {
+    if !state.allowed_hosts.contains(&host) {
         return Err(StatusCode::BAD_REQUEST);
     }
     Ok(normalized)
 }
 
 fn normalize_redirect_path(path: Option<&str>) -> String {
-    let Some(path) = path.map(str::trim) else {
-        return "/".to_string();
-    };
-    if path.starts_with('/') && !path.starts_with("//") && !path.contains('\\') {
-        path.to_string()
-    } else {
-        "/".to_string()
-    }
+    let path = path
+        .map(str::trim)
+        .filter(|p| p.starts_with('/') && !p.starts_with("//") && !p.contains('\\'));
+    path.map_or_else(|| "/".into(), Into::into)
 }
 
-fn redirect_complete_url(target_origin: &str, token: &str) -> String {
-    let mut query = form_urlencoded::Serializer::new(String::new());
-    query.append_pair("token", token);
-    format!(
-        "{target_origin}/api/auth/redirect/complete?{}",
-        query.finish()
-    )
+fn redirect_complete_url(origin: &str, token: &str) -> String {
+    format!("{origin}/api/auth/redirect/complete?token={token}")
 }
 
 fn issue_login_redirect_token(
     state: &AppState,
     user_id: &str,
-    target_origin: &str,
-    target_path: &str,
+    origin: &str,
+    path: &str,
 ) -> Result<String, StatusCode> {
     let now = OffsetDateTime::now_utc();
-    let expires_at = now + Duration::seconds(60);
-
-    let claims = LoginRedirectClaims {
-        iss: state.rp_origin.clone(),
-        aud: target_origin.to_string(),
-        sub: user_id.to_string(),
-        path: target_path.to_string(),
-        iat: now.unix_timestamp(),
-        exp: expires_at.unix_timestamp(),
-    };
-
     encode(
         &Header::default(),
-        &claims,
+        &LoginRedirectClaims {
+            iss: state.rp_origin.clone(),
+            aud: origin.to_string(),
+            sub: user_id.to_string(),
+            path: path.to_string(),
+            iat: now.unix_timestamp(),
+            exp: (now + Duration::seconds(60)).unix_timestamp(),
+        },
         &EncodingKey::from_secret(&state.jwt_secret),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -204,38 +188,34 @@ async fn register_begin(
     auth: MaybeAuthUser,
     Json(req): Json<RegisterBeginRequest>,
 ) -> Result<Json<BeginResponse<CreationChallengeResponse>>, StatusCode> {
-    // Clean up expired challenges
     sqlx::query("DELETE FROM auth_challenge WHERE expires_at < datetime('now')")
         .execute(&state.db)
         .await
         .ok();
 
-    // Check if user exists
     let existing: Option<(String, String)> = sqlx::query_as("SELECT id, name FROM user LIMIT 1")
         .fetch_optional(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // If user exists, require auth (adding additional passkey)
     if existing.is_some() && auth.0.is_none() {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
     let (user_id, user_name, is_new_user) = match existing {
         Some((id, name)) => (
-            Uuid::parse_str(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            id.parse().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
             name,
             false,
         ),
         None => {
-            let user_name = req
+            let name = req
                 .user_name
                 .as_deref()
                 .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .ok_or(StatusCode::BAD_REQUEST)?
-                .to_string();
-            (Uuid::new_v4(), user_name, true)
+                .filter(|n| !n.is_empty())
+                .ok_or(StatusCode::BAD_REQUEST)?;
+            (Uuid::new_v4(), name.to_string(), true)
         }
     };
 
@@ -355,23 +335,17 @@ async fn register_complete(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut jar = jar;
-
-    // Set session cookie on first setup
     if context.is_new_user {
-        let secure_cookie = request_secure_cookie(&headers, state.secure_cookies);
         let token = auth::create_token(&state.jwt_secret, &context.user_id)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let cookie = auth::session_cookie(token, secure_cookie);
-        jar = jar.add(cookie);
+        let cookie =
+            auth::session_cookie(token, request_secure_cookie(&headers, state.secure_cookies));
+        return Ok((
+            jar.add(cookie),
+            Json(serde_json::json!({ "success": true })),
+        ));
     }
-
-    Ok((
-        jar,
-        Json(serde_json::json!({
-            "success": true,
-        })),
-    ))
+    Ok((jar, Json(serde_json::json!({ "success": true }))))
 }
 
 async fn login_begin(
@@ -383,7 +357,6 @@ async fn login_begin(
         .as_ref()
         .map(|_| normalize_redirect_path(req.redirect_path.as_deref()));
 
-    // Clean up expired challenges
     sqlx::query("DELETE FROM auth_challenge WHERE expires_at < datetime('now')")
         .execute(&state.db)
         .await
@@ -498,25 +471,18 @@ async fn login_complete(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let cookie = auth::session_cookie(token, secure_cookie);
 
-    // Get user name
     let user_name: Option<(String,)> = sqlx::query_as("SELECT name FROM user WHERE id = ?")
         .bind(&context.user_id)
         .fetch_optional(&state.db)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let redirect_url = if let Some(target_origin) = context.redirect_origin.as_deref() {
-        let target_path = context
-            .redirect_path
-            .as_deref()
-            .map(str::to_string)
-            .unwrap_or_else(|| "/".to_string());
-        let token =
-            issue_login_redirect_token(&state, &context.user_id, target_origin, &target_path)?;
-        Some(redirect_complete_url(target_origin, &token))
-    } else {
-        None
-    };
+    let redirect_url = context.redirect_origin.as_deref().and_then(|origin| {
+        let path = context.redirect_path.as_deref().unwrap_or("/");
+        issue_login_redirect_token(&state, &context.user_id, origin, path)
+            .ok()
+            .map(|t| redirect_complete_url(origin, &t))
+    });
 
     Ok((
         jar.add(cookie),
@@ -569,17 +535,18 @@ async fn redirect_complete(
         return Err(StatusCode::UNAUTHORIZED);
     }
     let aud_host = origin_host(&claims.aud).ok_or(StatusCode::UNAUTHORIZED)?;
-    if !state.allowed_hosts.contains(aud_host.as_str()) {
+    if !state.allowed_hosts.contains(&aud_host) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let secure_cookie = origin.starts_with("https://");
     let token = auth::create_token(&state.jwt_secret, &claims.sub)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let cookie = auth::session_cookie(token, secure_cookie);
-    let redirect_path = normalize_redirect_path(Some(&claims.path));
+    let cookie = auth::session_cookie(token, origin.starts_with("https://"));
 
-    Ok((jar.add(cookie), Redirect::to(&redirect_path)))
+    Ok((
+        jar.add(cookie),
+        Redirect::to(&normalize_redirect_path(Some(&claims.path))),
+    ))
 }
 
 async fn logout(jar: CookieJar) -> CookieJar {
@@ -602,17 +569,16 @@ async fn list_passkeys(
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let passkeys = rows
-        .into_iter()
-        .map(|(id, name, created, last_used)| PasskeyInfo {
-            id,
-            name,
-            created,
-            last_used,
-        })
-        .collect();
-
-    Ok(Json(passkeys))
+    Ok(Json(
+        rows.into_iter()
+            .map(|(id, name, created, last_used)| PasskeyInfo {
+                id,
+                name,
+                created,
+                last_used,
+            })
+            .collect(),
+    ))
 }
 
 async fn rename_passkey(
@@ -652,24 +618,23 @@ async fn delete_passkey(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if result.rows_affected() == 0 {
-        // Distinguish "not found" from "last passkey" for the client
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM passkey WHERE id = ? AND user_id = ?)")
-                .bind(id)
-                .bind(&auth.user_id)
-                .fetch_one(&state.db)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        return Err(if exists {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::NOT_FOUND
-        });
+    if result.rows_affected() > 0 {
+        return Ok(StatusCode::NO_CONTENT);
     }
+    // Distinguish "not found" from "last passkey"
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM passkey WHERE id = ? AND user_id = ?)")
+            .bind(id)
+            .bind(&auth.user_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Err(if exists {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::NOT_FOUND
+    })
 }
 
 #[cfg(test)]

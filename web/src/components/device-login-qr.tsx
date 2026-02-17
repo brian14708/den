@@ -15,22 +15,16 @@ async function copyText(text: string): Promise<void> {
     await navigator.clipboard.writeText(text);
     return;
   }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.top = "-9999px";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
-  if (!copied) {
-    throw new Error("copy failed");
-  }
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.setAttribute("readonly", "");
+  el.style.cssText = "position:fixed;top:-9999px;opacity:0";
+  document.body.appendChild(el);
+  el.focus();
+  el.select();
+  const ok = document.execCommand("copy");
+  document.body.removeChild(el);
+  if (!ok) throw new Error("copy failed");
 }
 
 async function createRedirectUrl(): Promise<string> {
@@ -61,33 +55,29 @@ export function DeviceLoginQr() {
   const [copied, setCopied] = useState(false);
   const inFlightRef = useRef(false);
 
-  const generateQr = useCallback(
-    async (resetCopied: boolean) => {
-      if (inFlightRef.current) return;
-      inFlightRef.current = true;
-
-      setLoading(true);
-      setError(null);
-      if (resetCopied) setCopied(false);
-      try {
-        const url = await createRedirectUrl();
-        const dataUrl = await QRCode.toDataURL(url, {
-          errorCorrectionLevel: "M",
-          margin: 1,
-          width: 280,
-        });
-        setRedirectUrl(url);
-        setQrDataUrl(dataUrl);
-      } catch (e) {
-        if (isUnauthorizedError(e)) return;
+  const generateQr = useCallback(async (resetCopied: boolean) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setLoading(true);
+    setError(null);
+    if (resetCopied) setCopied(false);
+    try {
+      const url = await createRedirectUrl();
+      const dataUrl = await QRCode.toDataURL(url, {
+        errorCorrectionLevel: "M",
+        margin: 1,
+        width: 280,
+      });
+      setRedirectUrl(url);
+      setQrDataUrl(dataUrl);
+    } catch (e) {
+      if (!isUnauthorizedError(e))
         setError("Failed to generate login QR. Try again.");
-      } finally {
-        inFlightRef.current = false;
-        setLoading(false);
-      }
-    },
-    [],
-  );
+    } finally {
+      inFlightRef.current = false;
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!qrDataUrl) return;
@@ -115,7 +105,6 @@ export function DeviceLoginQr() {
   return (
     <div className="space-y-4">
       {error && <p className="text-destructive text-sm">{error}</p>}
-
       <Button variant="outline" onClick={handleGenerate} disabled={loading}>
         {loading
           ? "Generating QR..."
@@ -123,7 +112,6 @@ export function DeviceLoginQr() {
             ? "Regenerate login QR"
             : "Generate login QR"}
       </Button>
-
       {qrDataUrl && (
         <div className="space-y-3 rounded-lg border p-4">
           <Image

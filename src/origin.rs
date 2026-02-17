@@ -4,28 +4,26 @@ use axum::http::{HeaderMap, header};
 use url::Url;
 
 pub fn request_origin(headers: &HeaderMap, fallback_scheme: &str) -> Option<String> {
-    let proto = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or(fallback_scheme);
-
-    let host = request_host(headers)?;
-
-    Some(format!("{proto}://{host}"))
+    let proto = header_value_first(headers, "x-forwarded-proto").unwrap_or(fallback_scheme);
+    request_host(headers).map(|host| format!("{proto}://{host}"))
 }
 
 pub fn request_host(headers: &HeaderMap) -> Option<String> {
+    header_value_first(headers, "x-forwarded-host")
+        .or_else(|| header_value_first(headers, header::HOST))
+        .map(str::to_owned)
+}
+
+fn header_value_first(
+    headers: &HeaderMap,
+    name: impl axum::http::header::AsHeaderName,
+) -> Option<&str> {
     headers
-        .get("x-forwarded-host")
-        .or_else(|| headers.get(header::HOST))
+        .get(name)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next())
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .map(str::to_string)
 }
 
 pub fn normalize_origin(origin: &str) -> Option<String> {

@@ -37,9 +37,9 @@ async fn main() {
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     let db_dir = database_path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(db_dir).unwrap_or_else(|error| {
+    std::fs::create_dir_all(db_dir).unwrap_or_else(|e| {
         panic!(
-            "failed to create data directory at {}: {error}",
+            "failed to create data directory at {}: {e}",
             db_dir.display()
         )
     });

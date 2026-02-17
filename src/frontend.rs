@@ -26,30 +26,22 @@ fn is_safe_rel_path(path: &str) -> bool {
 }
 
 fn resolve_web_out_dir() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os(ENV_WEB_OUT_DIR) {
-        let path = PathBuf::from(path);
-        if path.is_dir() {
-            return Some(path);
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let path = bin_dir.join("../share/den/web/out");
-            if path.is_dir() {
-                return Some(path);
-            }
-        }
-    }
-
-    if let Ok(cwd) = std::env::current_dir() {
-        let path = cwd.join("web/out");
-        if path.is_dir() {
-            return Some(path);
-        }
-    }
-
-    None
+    std::env::var_os(ENV_WEB_OUT_DIR)
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            std::env::current_exe()
+                .ok()?
+                .parent()
+                .map(|d| d.join("../share/den/web/out"))
+                .filter(|p| p.is_dir())
+        })
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|d| d.join("web/out"))
+                .filter(|p| p.is_dir())
+        })
 }
 
 fn maybe_apply_cache_header(path: &str, response: &mut Response) {

@@ -8,24 +8,16 @@ import { authRedirectPathForSetup } from "@/lib/auth-routing";
 export default function Home() {
   const [ready, setReady] = useState(false);
 
-  const handleLogout = useCallback(() => {
-    window.location.replace("/login");
-  }, []);
+  const handleLogout = useCallback(() => window.location.replace("/login"), []);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const status = await getAuthStatus({ force: true });
-        if (status.authenticated) {
-          setReady(true);
-          return;
-        }
-        window.location.replace(authRedirectPathForSetup(status.setup_complete));
-      } catch {
-        window.location.replace("/setup");
-      }
-    };
-    void load();
+    getAuthStatus({ force: true })
+      .then((s) =>
+        s.authenticated
+          ? setReady(true)
+          : window.location.replace(authRedirectPathForSetup(s.setup_complete)),
+      )
+      .catch(() => window.location.replace("/setup"));
   }, []);
 
   if (!ready) {

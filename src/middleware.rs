@@ -38,45 +38,36 @@ pub async fn enforce_canonical_auth_origin(
         return next.run(request).await;
     }
 
-    let mut serializer = form_urlencoded::Serializer::new(String::new());
-    let mut has_redirect_origin = false;
-    let mut has_redirect_path = false;
+    let mut q = form_urlencoded::Serializer::new(String::new());
+    let (mut has_origin, mut has_path) = (false, false);
     if let Some(query) = request.uri().query() {
-        for (key, value) in form_urlencoded::parse(query.as_bytes()) {
-            if key == "redirect_origin" {
-                if is_login_path {
-                    has_redirect_origin = true;
-                }
-                continue;
-            }
-            if key == "redirect_path" {
-                if !is_login_path {
+        for (k, v) in form_urlencoded::parse(query.as_bytes()) {
+            match k.as_ref() {
+                "redirect_origin" if is_login_path => {
+                    has_origin = true;
                     continue;
                 }
-                has_redirect_path = true;
+                "redirect_origin" => continue,
+                "redirect_path" if !is_login_path => continue,
+                "redirect_path" => has_path = true,
+                _ => {}
             }
-            serializer.append_pair(&key, &value);
+            q.append_pair(&k, &v);
         }
     }
-    let origin_host = origin_host(&origin);
-    if is_login_path
-        && origin_host
-            .as_ref()
-            .is_some_and(|host| state.allowed_hosts.contains(host))
-    {
-        serializer.append_pair("redirect_origin", &origin);
-        has_redirect_origin = true;
+    if is_login_path && origin_host(&origin).is_some_and(|h| state.allowed_hosts.contains(&h)) {
+        q.append_pair("redirect_origin", &origin);
+        has_origin = true;
     }
-    if is_login_path && has_redirect_origin && !has_redirect_path {
-        serializer.append_pair("redirect_path", "/");
+    if is_login_path && has_origin && !has_path {
+        q.append_pair("redirect_path", "/");
     }
-    let query = serializer.finish();
+    let query = q.finish();
 
-    let mut redirect_url = format!("{}{}", state.rp_origin, path);
-    if !query.is_empty() {
-        redirect_url.push('?');
-        redirect_url.push_str(&query);
-    }
-
-    Redirect::temporary(&redirect_url).into_response()
+    let query = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{query}")
+    };
+    Redirect::temporary(&format!("{}{path}{query}", state.rp_origin)).into_response()
 }
