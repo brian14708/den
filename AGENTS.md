@@ -7,7 +7,7 @@ This file is the shared memory for all coding agents. Read it every session. Upd
 ## Stack
 
 - Rust (axum) backend, serves API + frontend assets from disk
-- Next.js 16 static export (React 19, Tailwind v4)
+- Next.js 16 static export (React 19, Tailwind v4, `trailingSlash: true`)
 - Nix flake: crane (Rust) + pnpm (frontend) → package or OCI image
 
 ## Commands
@@ -49,7 +49,7 @@ flake.nix          — full build pipeline + dev shell
 - Run formatters directly: `cargo fmt` and `cd web && pnpm fmt`
 - API endpoints: create `src/api/foo.rs`, add `mod foo` + route in `src/api/mod.rs`
 - Frontend pages: create `web/src/app/foo/page.tsx`
-- Frontend assets served from `DEN_WEB_OUT_DIR` or `$exe/../share/den/web/out`; dev fallback is `./web/out`
+- Frontend assets served from `DEN_WEB_OUT_DIR` or `$exe/../share/den/web/out`; dev fallback is `./web/out` (routes are directory `index.html` files)
 - Keep dependencies minimal
 - Git: conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), lowercase, imperative, no period
 - Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm lint && pnpm fmt && pnpm build`
