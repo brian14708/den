@@ -73,7 +73,7 @@ async fn main() {
 
     let app = axum::Router::new()
         .nest("/api", api::router())
-        .fallback(frontend::handler)
+        .fallback_service(frontend::service())
         .layer(from_fn_with_state(
             state.clone(),
             middleware::enforce_canonical_auth_origin,

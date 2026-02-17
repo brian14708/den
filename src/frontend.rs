@@ -1,7 +1,12 @@
 use std::path::{Component, Path, PathBuf};
+use std::task::{Context, Poll};
 
-use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::body::Body;
+use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use tower::Service;
+use tower::ServiceExt;
+use tower_http::services::ServeDir;
 
 const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const ENV_WEB_OUT_DIR: &str = "DEN_WEB_OUT_DIR";
@@ -18,6 +23,10 @@ fn is_safe_rel_path(path: &str) -> bool {
     Path::new(path)
         .components()
         .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn is_asset_path(path: &str) -> bool {
+    path.starts_with("_next/") || path.contains('.')
 }
 
 fn resolve_web_out_dir() -> Option<PathBuf> {
@@ -47,67 +56,122 @@ fn resolve_web_out_dir() -> Option<PathBuf> {
     None
 }
 
-async fn read_file(root: &Path, rel: &str) -> Option<Vec<u8>> {
-    if rel.is_empty() || !is_safe_rel_path(rel) {
-        return None;
+fn build_rewritten_uri(base: &Uri, new_path: &str) -> Uri {
+    if let Some(query) = base.query() {
+        // We control `new_path` (derived from the request path), so this should always parse.
+        format!("{new_path}?{query}")
+            .parse()
+            .unwrap_or_else(|_| Uri::from_static("/"))
+    } else {
+        new_path.parse().unwrap_or_else(|_| Uri::from_static("/"))
     }
-    let path = root.join(rel);
-    tokio::fs::read(path).await.ok()
 }
 
-fn response_for_bytes(
-    content_type: &str,
-    cache_control: Option<&'static str>,
-    bytes: Vec<u8>,
-) -> Response {
-    let mut res = (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, content_type)],
-        bytes,
-    )
-        .into_response();
-
-    if let Some(cache_control) = cache_control {
-        res.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static(cache_control),
-        );
-    }
-
-    res
+#[derive(Clone)]
+struct BaseRequest {
+    method: Method,
+    headers: HeaderMap,
+    uri: Uri,
 }
 
-pub async fn handler(uri: Uri) -> Response {
+fn build_request_for_path(request: &BaseRequest, new_path: &str) -> Request<Body> {
+    let uri = build_rewritten_uri(&request.uri, new_path);
+    let mut builder = Request::builder().method(request.method.clone()).uri(uri);
+    for (name, value) in request.headers.iter() {
+        builder = builder.header(name, value);
+    }
+    builder.body(Body::empty()).unwrap()
+}
+
+fn maybe_apply_cache_header(path: &str, response: &mut Response) {
+    let Some(cache_control) = cache_control_for_path(path) else {
+        return;
+    };
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control),
+    );
+}
+
+async fn handle_request(request: Request<Body>) -> Response {
     let Some(root) = resolve_web_out_dir() else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let path = uri.path().trim_start_matches('/');
+    let (parts, _body) = request.into_parts();
+    if parts.method != Method::GET && parts.method != Method::HEAD {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let base_request = BaseRequest {
+        method: parts.method,
+        headers: parts.headers,
+        uri: parts.uri,
+    };
+
+    let dir = ServeDir::new(root);
+
+    let path = base_request.uri.path().trim_start_matches('/');
     let path = path.trim_end_matches('/');
 
-    if !path.is_empty()
-        && let Some(bytes) = read_file(&root, path).await
-    {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-        return response_for_bytes(mime.as_ref(), cache_control_for_path(path), bytes);
+    if path.is_empty() {
+        let req = build_request_for_path(&base_request, "/index.html");
+        return dir.clone().oneshot(req).await.unwrap().map(Body::new);
     }
 
-    if !path.is_empty()
-        && let Some(bytes) = read_file(&root, &format!("{path}.html")).await
-    {
-        return response_for_bytes("text/html; charset=utf-8", None, bytes);
+    if !path.is_empty() && is_safe_rel_path(path) {
+        let req = build_request_for_path(&base_request, &format!("/{path}"));
+        let mut res = dir.clone().oneshot(req).await.unwrap().map(Body::new);
+        if res.status() != StatusCode::NOT_FOUND {
+            maybe_apply_cache_header(path, &mut res);
+            return res;
+        }
     }
 
-    if !path.is_empty()
-        && let Some(bytes) = read_file(&root, &format!("{path}/index.html")).await
-    {
-        return response_for_bytes("text/html; charset=utf-8", None, bytes);
+    // Don't fall back to HTML/SPA routes for asset requests (e.g. missing JS should stay 404).
+    if !is_safe_rel_path(path) || is_asset_path(path) {
+        return StatusCode::NOT_FOUND.into_response();
     }
 
-    match read_file(&root, "index.html").await {
-        Some(bytes) => response_for_bytes("text/html; charset=utf-8", None, bytes),
-        None => StatusCode::NOT_FOUND.into_response(),
+    let html_path = format!("{path}.html");
+    let req = build_request_for_path(&base_request, &format!("/{html_path}"));
+    let res = dir.clone().oneshot(req).await.unwrap().map(Body::new);
+    if res.status() != StatusCode::NOT_FOUND {
+        return res;
     }
+
+    let index_path = format!("{path}/index.html");
+    let req = build_request_for_path(&base_request, &format!("/{index_path}"));
+    let res = dir.clone().oneshot(req).await.unwrap().map(Body::new);
+    if res.status() != StatusCode::NOT_FOUND {
+        return res;
+    }
+
+    let req = build_request_for_path(&base_request, "/index.html");
+    dir.clone().oneshot(req).await.unwrap().map(Body::new)
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct FrontendService;
+
+impl Service<Request<Body>> for FrontendService {
+    type Response = Response;
+    type Error = std::convert::Infallible;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: Request<Body>) -> Self::Future {
+        Box::pin(async move { Ok(handle_request(request).await) })
+    }
+}
+
+pub fn service() -> FrontendService {
+    FrontendService
 }
 
 #[cfg(test)]
@@ -136,5 +200,14 @@ mod tests {
         assert!(!is_safe_rel_path("a/../../b"));
         assert!(is_safe_rel_path("_next/static/chunks/app.js"));
         assert!(is_safe_rel_path("settings.html"));
+    }
+
+    #[test]
+    fn asset_paths_skip_spa_fallback() {
+        assert!(is_asset_path("_next/static/chunks/app.js"));
+        assert!(is_asset_path("favicon.ico"));
+        assert!(is_asset_path("foo/bar.png"));
+        assert!(!is_asset_path("settings"));
+        assert!(!is_asset_path("setup"));
     }
 }
