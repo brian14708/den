@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 use std::task::{Context, Poll};
 
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, Uri, header};
+use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use tower::Service;
 use tower::ServiceExt;
@@ -23,10 +23,6 @@ fn is_safe_rel_path(path: &str) -> bool {
     Path::new(path)
         .components()
         .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn is_asset_path(path: &str) -> bool {
-    path.starts_with("_next/")
 }
 
 fn resolve_web_out_dir() -> Option<PathBuf> {
@@ -56,33 +52,6 @@ fn resolve_web_out_dir() -> Option<PathBuf> {
     None
 }
 
-fn build_rewritten_uri(base: &Uri, new_path: &str) -> Uri {
-    if let Some(query) = base.query() {
-        // We control `new_path` (derived from the request path), so this should always parse.
-        format!("{new_path}?{query}")
-            .parse()
-            .unwrap_or_else(|_| Uri::from_static("/"))
-    } else {
-        new_path.parse().unwrap_or_else(|_| Uri::from_static("/"))
-    }
-}
-
-#[derive(Clone)]
-struct BaseRequest {
-    method: Method,
-    headers: HeaderMap,
-    uri: Uri,
-}
-
-fn build_request_for_path(request: &BaseRequest, new_path: &str) -> Request<Body> {
-    let uri = build_rewritten_uri(&request.uri, new_path);
-    let mut builder = Request::builder().method(request.method.clone()).uri(uri);
-    for (name, value) in request.headers.iter() {
-        builder = builder.header(name, value);
-    }
-    builder.body(Body::empty()).unwrap()
-}
-
 fn maybe_apply_cache_header(path: &str, response: &mut Response) {
     let Some(cache_control) = cache_control_for_path(path) else {
         return;
@@ -98,42 +67,23 @@ async fn handle_request(request: Request<Body>) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let (parts, _body) = request.into_parts();
-    if parts.method != Method::GET && parts.method != Method::HEAD {
+    if request.method() != Method::GET && request.method() != Method::HEAD {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let base_request = BaseRequest {
-        method: parts.method,
-        headers: parts.headers,
-        uri: parts.uri,
-    };
+    let rel_path = request.uri().path().trim_start_matches('/').to_string();
 
-    let rel_path = base_request.uri.path().trim_start_matches('/');
-
-    if !rel_path.is_empty() && !is_safe_rel_path(rel_path) {
+    if !rel_path.is_empty() && !is_safe_rel_path(&rel_path) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let is_asset = is_asset_path(rel_path);
-
-    let dir = ServeDir::new(&root).append_index_html_on_directories(true);
-    let req = build_request_for_path(&base_request, base_request.uri.path());
-    let mut res = dir.oneshot(req).await.unwrap().map(Body::new);
-
-    if res.status() == StatusCode::NOT_FOUND && !is_asset {
-        let req = build_request_for_path(&base_request, "/_not-found/index.html");
-        let mut fallback = ServeFile::new(root.join("_not-found/index.html"))
-            .oneshot(req)
-            .await
-            .unwrap()
-            .map(Body::new);
-        *fallback.status_mut() = StatusCode::NOT_FOUND;
-        res = fallback;
-    }
+    let dir = ServeDir::new(&root)
+        .append_index_html_on_directories(true)
+        .not_found_service(ServeFile::new(root.join("_not-found/index.html")));
+    let mut res = dir.oneshot(request).await.unwrap().map(Body::new);
 
     if res.status() != StatusCode::NOT_FOUND {
-        maybe_apply_cache_header(rel_path, &mut res);
+        maybe_apply_cache_header(&rel_path, &mut res);
     }
 
     res
@@ -190,12 +140,5 @@ mod tests {
         assert!(is_safe_rel_path("settings.html"));
     }
 
-    #[test]
-    fn asset_paths_skip_spa_fallback() {
-        assert!(is_asset_path("_next/static/chunks/app.js"));
-        assert!(!is_asset_path("favicon.ico"));
-        assert!(!is_asset_path("foo/bar.png"));
-        assert!(!is_asset_path("settings"));
-        assert!(!is_asset_path("setup"));
-    }
+    // Not testing `ServeDir` behavior here; we keep unit tests focused on path/cache helpers.
 }
