@@ -12,11 +12,25 @@ const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const ENV_WEB_OUT_DIR: &str = "DEN_WEB_OUT_DIR";
 
 fn cache_control_for_path(path: &str) -> Option<&'static str> {
-    if path.starts_with("_next/") {
+    if path.starts_with("assets/") {
         Some(CACHE_CONTROL_IMMUTABLE)
     } else {
         None
     }
+}
+
+fn is_asset_path(path: &str) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    if path.starts_with("assets/") {
+        return true;
+    }
+    // Avoid serving `index.html` for missing static assets (eg `app.js`, `favicon.ico`).
+    Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.contains('.'))
 }
 
 fn is_safe_rel_path(path: &str) -> bool {
@@ -63,16 +77,42 @@ async fn handle_request(request: Request<Body>) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    // If we need to fall back to `/index.html`, reconstruct a request using the same
+    // method/uri/headers. (Request bodies are irrelevant since we only handle GET/HEAD.)
+    let request_method = request.method().clone();
+    let request_uri = request.uri().clone();
+    let request_headers = request.headers().clone();
+
     let rel_path = request.uri().path().trim_start_matches('/').to_string();
 
     if !rel_path.is_empty() && !is_safe_rel_path(&rel_path) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let dir = ServeDir::new(&root)
-        .append_index_html_on_directories(true)
-        .not_found_service(ServeFile::new(root.join("_not-found/index.html")));
+    let dir = ServeDir::new(&root).append_index_html_on_directories(true);
     let mut res = dir.oneshot(request).await.unwrap().map(Body::new);
+
+    if res.status() == StatusCode::NOT_FOUND {
+        if is_asset_path(&rel_path) {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+
+        let fallback_req = {
+            let mut req = Request::builder()
+                .method(request_method)
+                .uri(request_uri)
+                .body(Body::empty())
+                .unwrap();
+            *req.headers_mut() = request_headers;
+            req
+        };
+
+        res = ServeFile::new(root.join("index.html"))
+            .oneshot(fallback_req)
+            .await
+            .unwrap()
+            .map(Body::new);
+    }
 
     if res.status() != StatusCode::NOT_FOUND {
         maybe_apply_cache_header(&rel_path, &mut res);
@@ -109,16 +149,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn next_static_assets_are_immutable() {
+    fn vite_static_assets_are_immutable() {
         assert_eq!(
-            cache_control_for_path("_next/static/chunks/app.js"),
+            cache_control_for_path("assets/index-abc123.js"),
             Some(CACHE_CONTROL_IMMUTABLE)
         );
     }
 
     #[test]
-    fn non_next_assets_do_not_set_cache_control() {
+    fn non_asset_files_do_not_set_cache_control() {
         assert_eq!(cache_control_for_path("index.html"), None);
+    }
+
+    #[test]
+    fn dot_paths_are_assets() {
+        assert!(is_asset_path("assets/index-abc123.js"));
+        assert!(is_asset_path("favicon.ico"));
+        assert!(is_asset_path("css/app.css"));
+        assert!(!is_asset_path(""));
+        assert!(!is_asset_path("settings"));
     }
 
     #[test]
@@ -128,7 +177,7 @@ mod tests {
         assert!(!is_safe_rel_path("./index.html"));
         assert!(!is_safe_rel_path("/index.html"));
         assert!(!is_safe_rel_path("a/../../b"));
-        assert!(is_safe_rel_path("_next/static/chunks/app.js"));
+        assert!(is_safe_rel_path("assets/index-abc123.js"));
         assert!(is_safe_rel_path("settings.html"));
     }
 

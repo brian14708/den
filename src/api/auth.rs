@@ -93,7 +93,6 @@ struct RedirectCompleteQuery {
 
 #[derive(Deserialize)]
 struct RedirectStartRequest {
-    redirect_origin: String,
     redirect_path: Option<String>,
 }
 
@@ -140,18 +139,6 @@ fn normalize_redirect_origin(
         return Err(StatusCode::BAD_REQUEST);
     }
     Ok(Some(normalized))
-}
-
-fn normalize_redirect_target_origin(state: &AppState, origin: &str) -> Result<String, StatusCode> {
-    let normalized = normalize_origin(origin).ok_or(StatusCode::BAD_REQUEST)?;
-    if normalized.eq_ignore_ascii_case(&state.rp_origin) {
-        return Ok(state.rp_origin.clone());
-    }
-    let host = origin_host(&normalized).ok_or(StatusCode::BAD_REQUEST)?;
-    if !state.allowed_hosts.contains(&host) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    Ok(normalized)
 }
 
 fn normalize_redirect_path(path: Option<&str>) -> String {
@@ -503,7 +490,10 @@ async fn redirect_start(
     auth: AuthUser,
     Json(req): Json<RedirectStartRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let target_origin = normalize_redirect_target_origin(&state, &req.redirect_origin)?;
+    // QR login links should always use the configured RP origin as the canonical host.
+    // If we later want to support minting QR links for other hosts, reintroduce strict
+    // validation (similar to login_begin/login_complete).
+    let target_origin = state.rp_origin.clone();
     let target_path = normalize_redirect_path(req.redirect_path.as_deref());
     let token = issue_login_redirect_token(&state, &auth.user_id, &target_origin, &target_path)?;
 

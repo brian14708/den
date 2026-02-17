@@ -27,7 +27,7 @@ fn header_value_first(
 }
 
 pub fn normalize_origin(origin: &str) -> Option<String> {
-    let parsed = Url::parse(origin).ok()?;
+    let mut parsed = Url::parse(origin).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
     }
@@ -35,12 +35,31 @@ pub fn normalize_origin(origin: &str) -> Option<String> {
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return None;
     }
+
+    // Treat explicit default ports as equivalent to the default origin serialization.
+    if let Some(port) = parsed.port() {
+        let is_default = match parsed.scheme() {
+            "http" => port == 80,
+            "https" => port == 443,
+            _ => false,
+        };
+        if is_default {
+            parsed.set_port(None).ok()?;
+        }
+    }
+
     Some(parsed.origin().ascii_serialization())
 }
 
 fn host_with_port(url: &Url) -> Option<String> {
     let host = url.host_str()?.to_ascii_lowercase();
     Some(match url.port() {
+        Some(port)
+            if (url.scheme() == "http" && port == 80)
+                || (url.scheme() == "https" && port == 443) =>
+        {
+            host
+        }
         Some(port) => format!("{host}:{port}"),
         None => host,
     })
@@ -106,6 +125,38 @@ pub fn load_allowed_hosts(rp_origin: &str, configured_hosts: &[String]) -> HashS
 mod tests {
     use super::*;
     use axum::http::HeaderValue;
+
+    #[test]
+    fn normalize_origin_strips_default_ports() {
+        assert_eq!(
+            normalize_origin("https://lab.014708.xyz:443").as_deref(),
+            Some("https://lab.014708.xyz")
+        );
+        assert_eq!(
+            normalize_origin("http://lab.014708.xyz:80").as_deref(),
+            Some("http://lab.014708.xyz")
+        );
+        assert_eq!(
+            normalize_origin("https://lab.014708.xyz:444").as_deref(),
+            Some("https://lab.014708.xyz:444")
+        );
+    }
+
+    #[test]
+    fn origin_host_strips_default_ports() {
+        assert_eq!(
+            origin_host("https://lab.014708.xyz:443").as_deref(),
+            Some("lab.014708.xyz")
+        );
+        assert_eq!(
+            origin_host("http://lab.014708.xyz:80").as_deref(),
+            Some("lab.014708.xyz")
+        );
+        assert_eq!(
+            origin_host("https://lab.014708.xyz:444").as_deref(),
+            Some("lab.014708.xyz:444")
+        );
+    }
 
     #[test]
     fn request_origin_uses_fallback_scheme_when_proto_missing() {

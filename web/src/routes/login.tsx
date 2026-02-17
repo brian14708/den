@@ -1,9 +1,13 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+
 import { Login } from "@/components/auth/login";
 import { type PasskeyAuthResult, type RedirectRequest } from "@/lib/webauthn";
+
+export const Route = createFileRoute("/login")({
+  component: LoginRouteComponent,
+});
 
 async function startRedirect(redirect: RedirectRequest): Promise<string> {
   const res = await fetch("/api/login/redirect", {
@@ -21,7 +25,6 @@ async function startRedirect(redirect: RedirectRequest): Promise<string> {
 }
 
 function readRedirectFromLocation(): RedirectRequest | undefined {
-  if (typeof window === "undefined") return undefined;
   const searchParams = new URLSearchParams(window.location.search);
   const redirectOrigin = searchParams.get("redirect_origin")?.trim();
   if (!redirectOrigin) return undefined;
@@ -42,8 +45,8 @@ async function isSetupComplete(): Promise<boolean> {
   return res.status === 401;
 }
 
-export default function LoginPage() {
-  const router = useRouter();
+function LoginRouteComponent() {
+  const navigate = useNavigate();
   const [ready, setReady] = useState(false);
   const [redirect] = useState<RedirectRequest | undefined>(() =>
     readRedirectFromLocation(),
@@ -52,9 +55,9 @@ export default function LoginPage() {
   useEffect(() => {
     isSetupComplete().then((complete) => {
       if (complete) setReady(true);
-      else router.replace("/setup");
+      else navigate({ to: "/setup", replace: true });
     });
-  }, [router]);
+  }, [navigate]);
 
   const handleComplete = useCallback(
     async (result: PasskeyAuthResult) => {
@@ -71,9 +74,9 @@ export default function LoginPage() {
           // Fall through to home if redirect fails.
         }
       }
-      router.replace("/");
+      navigate({ to: "/", replace: true });
     },
-    [router, redirect],
+    [navigate, redirect],
   );
 
   if (!ready) return null;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 
 interface DashboardProps {
@@ -42,7 +42,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             Sign out
           </Button>
           <Button variant="outline" size="icon" asChild>
-            <Link href="/settings" aria-label="Settings">
+            <Link to="/settings" aria-label="Settings">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"

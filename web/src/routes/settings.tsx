@@ -1,15 +1,18 @@
-"use client";
+import { Link, createFileRoute } from "@tanstack/react-router";
 
-import Link from "next/link";
 import { DeviceLoginQr } from "@/components/device-login-qr";
 import { PasskeyList } from "@/components/passkey-list";
 
-export default function SettingsPage() {
+export const Route = createFileRoute("/settings")({
+  component: SettingsRouteComponent,
+});
+
+function SettingsRouteComponent() {
   return (
     <main className="mx-auto max-w-lg px-4 py-12">
       <div className="mb-8 flex items-center gap-4">
         <Link
-          href="/"
+          to="/"
           className="text-muted-foreground hover:text-foreground text-sm"
         >
           &larr; Back

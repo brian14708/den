@@ -1,19 +1,20 @@
 # den
 
-Personal agent hub & dashboard. Rust + Next.js.
+Personal agent hub & dashboard. Rust + Vite.
 
 This file is the shared memory for all coding agents. Read it every session. Update it as you learn.
 
 ## Stack
 
 - Rust (axum) backend, serves API + frontend assets from disk
-- Next.js 16 static export (React 19, Tailwind v4, `trailingSlash: true`)
+- Vite SPA (React 19, Tailwind v4, TanStack Router)
 - Nix flake: crane (Rust) + pnpm (frontend) → package or OCI image
 
 ## Commands
 
 ```bash
 cd web && pnpm install && pnpm build   # build frontend (required before cargo)
+cd web && pnpm dev                    # Vite dev server on :3001 (proxies /api -> :3000)
 cargo run                               # dev server on :3000
 nix build                               # release binary at ./result/bin/den
 nix build .#oci                         # OCI container image
@@ -36,7 +37,9 @@ src/middleware.rs  — cross-cutting HTTP middleware (canonical auth-origin redi
 src/state.rs       — AppState (SqlitePool, Webauthn, JWT secret)
 src/frontend.rs    — filesystem static serving + SPA fallback
 migrations/        — sqlx migrations (run automatically on startup)
-web/src/app/       — Next.js App Router pages
+web/index.html     — SPA entry HTML
+web/vite.config.ts — Vite config (+ TanStack Router codegen)
+web/src/routes/    — TanStack Router file-based routes
 web/src/lib/       — shared utilities (webauthn browser helpers)
 web/src/components/ — React components (auth/, ui/)
 flake.nix          — full build pipeline + dev shell
@@ -48,8 +51,8 @@ flake.nix          — full build pipeline + dev shell
 - UI components: shadcn/ui (new-york style, neutral base color, `@/components/ui`). Add via `pnpm dlx shadcn@latest add <component>`
 - Run formatters directly: `cargo fmt` and `cd web && pnpm fmt`
 - API endpoints: create `src/api/foo.rs`, add `mod foo` + route in `src/api/mod.rs`
-- Frontend pages: create `web/src/app/foo/page.tsx`
-- Frontend assets served from `DEN_WEB_OUT_DIR` or `$exe/../share/den/web/out`; dev fallback is `./web/out` (routes are directory `index.html` files)
+- Frontend pages: create `web/src/routes/foo.tsx`
+- Frontend assets served from `DEN_WEB_OUT_DIR` or `$exe/../share/den/web/out`; dev fallback is `./web/out` (SPA fallback serves `index.html` for deep links)
 - Keep dependencies minimal
 - Git: conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), lowercase, imperative, no period
 - Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm lint && pnpm fmt && pnpm build`
@@ -73,6 +76,7 @@ allowed_hosts = []
 Record architectural decisions, gotchas, and preferences here as they arise.
 
 - Serve frontend from filesystem: resolve via `DEN_WEB_OUT_DIR`, then `$exe/../share/den/web/out`, then `./web/out`
+- Static serving: return `index.html` for unknown non-asset paths so SPA routes work on refresh/deep links; keep 404s for missing assets
 - pnpm in nix: use top-level `pkgs.fetchPnpmDeps` + `pkgs.pnpmConfigHook`, not `pnpm_10.fetchDeps` (deprecated); `fetcherVersion = 3` required
 - crane `cleanCargoSource` strips non-Rust files — frontend built separately and installed under `$out/share/den/web/out`
 - sqlx migrations: add numbered SQL files in `migrations/` (e.g. `0002_widgets.sql`), they run automatically on startup

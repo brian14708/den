@@ -51,10 +51,8 @@
               inherit (finalAttrs) pname version src;
               pnpm = pkgs.pnpm_10;
               fetcherVersion = 3;
-              hash = "sha256-JpDdwzcyv+90opAeQV8UVXBhAmTlTr/8ORhypclIGC8=";
+              hash = "sha256-ibPkx7q3BypBN35Grtn1H/Oo9OfgGvXGTaDInp648uE=";
             };
-
-            env.NEXT_TELEMETRY_DISABLED = "1";
 
             buildPhase = ''
               runHook preBuild

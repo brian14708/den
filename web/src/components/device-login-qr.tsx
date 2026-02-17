@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { apiFetch, isUnauthorizedError } from "@/lib/api-fetch";
@@ -28,12 +27,10 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function createRedirectUrl(): Promise<string> {
-  const redirectOrigin = window.location.origin;
   const res = await apiFetch("/api/login/redirect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      redirect_origin: redirectOrigin,
       redirect_path: "/",
     }),
   });
@@ -114,7 +111,7 @@ export function DeviceLoginQr() {
       </Button>
       {qrDataUrl && (
         <div className="space-y-3 rounded-lg border p-4">
-          <Image
+          <img
             src={qrDataUrl}
             alt="Login QR code"
             width={280}
