@@ -10,6 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { isUnauthorizedError } from "@/lib/api-fetch";
 import { Label } from "@/components/ui/label";
 import { registerPasskey } from "@/lib/webauthn";
 
@@ -31,6 +32,7 @@ export function Setup({ onComplete }: SetupProps) {
       await registerPasskey(trimmedName, "initial");
       await onComplete(trimmedName);
     } catch (e) {
+      if (isUnauthorizedError(e)) return;
       setError(e instanceof Error ? e.message : "Setup failed");
     } finally {
       setLoading(false);

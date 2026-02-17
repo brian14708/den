@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { apiFetch, isUnauthorizedError } from "@/lib/api-fetch";
 import { registerPasskey } from "@/lib/webauthn";
 
 interface Passkey {
@@ -18,10 +19,6 @@ interface Passkey {
   name: string;
   created: string;
   last_used: string | null;
-}
-
-interface PasskeyListProps {
-  onUnauthorized?: () => void;
 }
 
 function formatDate(iso: string): string {
@@ -32,7 +29,7 @@ function formatDate(iso: string): string {
   });
 }
 
-export function PasskeyList({ onUnauthorized }: PasskeyListProps) {
+export function PasskeyList() {
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -43,19 +40,16 @@ export function PasskeyList({ onUnauthorized }: PasskeyListProps) {
 
   const fetchPasskeys = useCallback(async () => {
     try {
-      const res = await fetch("/api/auth/passkeys");
-      if (res.status === 401) {
-        onUnauthorized?.();
-        return;
-      }
+      const res = await apiFetch("/api/auth/passkeys");
       if (!res.ok) throw new Error("Failed to load passkeys");
       setPasskeys(await res.json());
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) return;
       setError("Failed to load passkeys");
     } finally {
       setLoading(false);
     }
-  }, [onUnauthorized]);
+  }, []);
 
   useEffect(() => {
     fetchPasskeys();
@@ -65,19 +59,16 @@ export function PasskeyList({ onUnauthorized }: PasskeyListProps) {
     const trimmed = editName.trim();
     if (!trimmed) return;
     try {
-      const res = await fetch(`/api/auth/passkeys/${id}/name`, {
+      const res = await apiFetch(`/api/auth/passkeys/${id}/name`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed }),
       });
-      if (res.status === 401) {
-        onUnauthorized?.();
-        return;
-      }
       if (!res.ok) throw new Error("Rename failed");
       setEditingId(null);
       await fetchPasskeys();
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) return;
       setError("Failed to rename passkey");
     }
   };
@@ -85,17 +76,14 @@ export function PasskeyList({ onUnauthorized }: PasskeyListProps) {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      const res = await fetch(`/api/auth/passkeys/${deleteTarget.id}`, {
+      const res = await apiFetch(`/api/auth/passkeys/${deleteTarget.id}`, {
         method: "DELETE",
       });
-      if (res.status === 401) {
-        onUnauthorized?.();
-        return;
-      }
       if (!res.ok) throw new Error("Delete failed");
       setDeleteTarget(null);
       await fetchPasskeys();
-    } catch {
+    } catch (error) {
+      if (isUnauthorizedError(error)) return;
       setError("Failed to delete passkey");
     }
   };
@@ -109,10 +97,7 @@ export function PasskeyList({ onUnauthorized }: PasskeyListProps) {
       await registerPasskey(null, name.trim());
       await fetchPasskeys();
     } catch (error) {
-      if (error instanceof Error && error.message === "Unauthorized") {
-        onUnauthorized?.();
-        return;
-      }
+      if (isUnauthorizedError(error)) return;
       setError("Failed to add passkey");
     } finally {
       setAdding(false);

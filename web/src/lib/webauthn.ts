@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api-fetch";
+
 const DEFAULT_WEBAUTHN_TIMEOUT_MS = 60_000;
 const MIN_WEBAUTHN_TIMEOUT_MS = 5_000;
 const MAX_WEBAUTHN_TIMEOUT_MS = 120_000;
@@ -223,12 +225,11 @@ export async function registerPasskey(
   }
   applyRedirectPayload(payload, redirect);
 
-  const beginRes = await fetch("/api/auth/register/begin", {
+  const beginRes = await apiFetch("/api/auth/register/begin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (beginRes.status === 401) throw new Error("Unauthorized");
   if (!beginRes.ok) throw new Error("Registration failed to start");
   const { challenge_id, options } = await beginRes.json();
 
@@ -278,12 +279,11 @@ export async function registerPasskey(
     extensions: credential.getClientExtensionResults(),
   };
 
-  const completeRes = await fetch("/api/auth/register/complete", {
+  const completeRes = await apiFetch("/api/auth/register/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ challenge_id, credential: credentialData }),
   });
-  if (completeRes.status === 401) throw new Error("Unauthorized");
   if (!completeRes.ok) throw new Error("Registration failed to complete");
   const completeData = (await completeRes.json()) as RegisterCompleteResponse;
   return {
@@ -311,7 +311,7 @@ export async function loginWithPasskey(
   } = {};
   applyRedirectPayload(beginPayload, redirect);
 
-  const beginRes = await fetch("/api/auth/login/begin", {
+  const beginRes = await apiFetch("/api/auth/login/begin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(beginPayload),
@@ -363,7 +363,7 @@ export async function loginWithPasskey(
     extensions: credential.getClientExtensionResults(),
   };
 
-  const completeRes = await fetch("/api/auth/login/complete", {
+  const completeRes = await apiFetch("/api/auth/login/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ challenge_id, credential: credentialData }),

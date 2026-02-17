@@ -4,10 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
-
-interface DeviceLoginQrProps {
-  onUnauthorized?: () => void;
-}
+import { apiFetch, isUnauthorizedError } from "@/lib/api-fetch";
 
 interface RedirectStartResponse {
   redirect_url?: string;
@@ -38,7 +35,7 @@ async function copyText(text: string): Promise<void> {
 
 async function createRedirectUrl(): Promise<string> {
   const redirectOrigin = window.location.origin;
-  const res = await fetch("/api/auth/redirect/start", {
+  const res = await apiFetch("/api/auth/redirect/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -46,9 +43,6 @@ async function createRedirectUrl(): Promise<string> {
       redirect_path: "/",
     }),
   });
-  if (res.status === 401) {
-    throw new Error("UNAUTHORIZED");
-  }
   if (!res.ok) {
     throw new Error("Failed to create login QR");
   }
@@ -59,7 +53,7 @@ async function createRedirectUrl(): Promise<string> {
   return data.redirect_url;
 }
 
-export function DeviceLoginQr({ onUnauthorized }: DeviceLoginQrProps) {
+export function DeviceLoginQr() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -85,17 +79,14 @@ export function DeviceLoginQr({ onUnauthorized }: DeviceLoginQrProps) {
         setRedirectUrl(url);
         setQrDataUrl(dataUrl);
       } catch (e) {
-        if (e instanceof Error && e.message === "UNAUTHORIZED") {
-          onUnauthorized?.();
-          return;
-        }
+        if (isUnauthorizedError(e)) return;
         setError("Failed to generate login QR. Try again.");
       } finally {
         inFlightRef.current = false;
         setLoading(false);
       }
     },
-    [onUnauthorized],
+    [],
   );
 
   useEffect(() => {

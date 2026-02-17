@@ -14,6 +14,7 @@ import {
   type PasskeyAuthResult,
   type RedirectRequest,
 } from "@/lib/webauthn";
+import { isUnauthorizedError } from "@/lib/api-fetch";
 
 interface LoginProps {
   redirect?: RedirectRequest;
@@ -31,6 +32,7 @@ export function Login({ onComplete, redirect }: LoginProps) {
       const result = await loginWithPasskey(redirect);
       await onComplete(result);
     } catch (e) {
+      if (isUnauthorizedError(e)) return;
       setError(e instanceof Error ? e.message : "Login failed");
     } finally {
       setLoading(false);
