@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, Uri, heade
 use axum::response::{IntoResponse, Response};
 use tower::Service;
 use tower::ServiceExt;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const ENV_WEB_OUT_DIR: &str = "DEN_WEB_OUT_DIR";
@@ -109,46 +109,31 @@ async fn handle_request(request: Request<Body>) -> Response {
         uri: parts.uri,
     };
 
-    let dir = ServeDir::new(root);
+    let rel_path = base_request.uri.path().trim_start_matches('/');
 
-    let path = base_request.uri.path().trim_start_matches('/');
-    let path = path.trim_end_matches('/');
-
-    if path.is_empty() {
-        let req = build_request_for_path(&base_request, "/index.html");
-        return dir.clone().oneshot(req).await.unwrap().map(Body::new);
-    }
-
-    if !path.is_empty() && is_safe_rel_path(path) {
-        let req = build_request_for_path(&base_request, &format!("/{path}"));
-        let mut res = dir.clone().oneshot(req).await.unwrap().map(Body::new);
-        if res.status() != StatusCode::NOT_FOUND {
-            maybe_apply_cache_header(path, &mut res);
-            return res;
-        }
-    }
-
-    // Don't fall back to HTML/SPA routes for asset requests (e.g. missing JS should stay 404).
-    if !is_safe_rel_path(path) || is_asset_path(path) {
+    if !rel_path.is_empty() && !is_safe_rel_path(rel_path) {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let html_path = format!("{path}.html");
-    let req = build_request_for_path(&base_request, &format!("/{html_path}"));
-    let res = dir.clone().oneshot(req).await.unwrap().map(Body::new);
+    let is_asset = is_asset_path(rel_path);
+
+    let assets_dir = ServeDir::new(&root).append_index_html_on_directories(true);
+    let routes_dir = ServeDir::new(&root)
+        .append_index_html_on_directories(true)
+        .not_found_service(ServeFile::new(root.join("_not-found/index.html")));
+
+    let req = build_request_for_path(&base_request, base_request.uri.path());
+    let mut res = if is_asset {
+        assets_dir.oneshot(req).await.unwrap().map(Body::new)
+    } else {
+        routes_dir.oneshot(req).await.unwrap().map(Body::new)
+    };
+
     if res.status() != StatusCode::NOT_FOUND {
-        return res;
+        maybe_apply_cache_header(rel_path, &mut res);
     }
 
-    let index_path = format!("{path}/index.html");
-    let req = build_request_for_path(&base_request, &format!("/{index_path}"));
-    let res = dir.clone().oneshot(req).await.unwrap().map(Body::new);
-    if res.status() != StatusCode::NOT_FOUND {
-        return res;
-    }
-
-    let req = build_request_for_path(&base_request, "/index.html");
-    dir.clone().oneshot(req).await.unwrap().map(Body::new)
+    res
 }
 
 #[derive(Clone, Copy, Default)]
