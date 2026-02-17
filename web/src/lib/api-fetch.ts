@@ -1,5 +1,3 @@
-import { getUnauthorizedRedirectPath } from "@/lib/auth-routing";
-
 export class UnauthorizedError extends Error {
   constructor() {
     super("Unauthorized");
@@ -7,32 +5,13 @@ export class UnauthorizedError extends Error {
   }
 }
 
-interface ApiFetchOptions extends RequestInit {
-  redirectOnUnauthorized?: boolean;
-}
-
-let redirectPromise: Promise<void> | null = null;
-
-async function redirectForUnauthorized(): Promise<void> {
-  if (typeof window === "undefined") return;
-  if (!redirectPromise) {
-    redirectPromise = getUnauthorizedRedirectPath()
-      .then((p) => window.location.replace(p))
-      .finally(() => {
-        redirectPromise = null;
-      });
-  }
-  await redirectPromise;
-}
-
 export async function apiFetch(
   input: RequestInfo | URL,
-  init?: ApiFetchOptions,
+  init?: RequestInit,
 ): Promise<Response> {
-  const { redirectOnUnauthorized = true, ...requestInit } = init ?? {};
-  const res = await fetch(input, requestInit);
-  if (res.status === 401 && redirectOnUnauthorized) {
-    await redirectForUnauthorized();
+  const res = await fetch(input, init);
+  if (res.status === 401) {
+    if (typeof window !== "undefined") window.location.replace("/login");
     throw new UnauthorizedError();
   }
   return res;

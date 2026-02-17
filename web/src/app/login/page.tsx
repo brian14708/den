@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Login } from "@/components/auth/login";
-import { getAuthStatus } from "@/lib/auth-status";
 import { type PasskeyAuthResult, type RedirectRequest } from "@/lib/webauthn";
 
 async function startRedirect(redirect: RedirectRequest): Promise<string> {
@@ -33,47 +32,29 @@ function readRedirectFromLocation(): RedirectRequest | undefined {
   };
 }
 
+async function isSetupComplete(): Promise<boolean> {
+  const res = await fetch("/api/auth/register/begin", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ user_name: "", passkey_name: "" }),
+  });
+  return res.status === 401;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [redirect] = useState<RedirectRequest | undefined>(() =>
     readRedirectFromLocation(),
   );
+
   useEffect(() => {
-    let cancelled = false;
-    const redirectForLoad = redirect;
-
-    const load = async () => {
-      try {
-        const status = await getAuthStatus({ force: true });
-        if (status.authenticated) {
-          if (redirectForLoad) {
-            try {
-              const redirectUrl = await startRedirect(redirectForLoad);
-              window.location.assign(redirectUrl);
-              return;
-            } catch {
-              // Fall back to canonical dashboard if redirect fails.
-            }
-          }
-          router.replace("/");
-          return;
-        }
-        if (!status.setup_complete) {
-          router.replace("/setup");
-          return;
-        }
-        if (!cancelled) setReady(true);
-      } catch {
-        if (!cancelled) router.replace("/setup");
-      }
-    };
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [router, redirect]);
+    isSetupComplete().then((complete) => {
+      if (complete) setReady(true);
+      else router.replace("/setup");
+    });
+  }, [router]);
 
   const handleComplete = useCallback(
     async (result: PasskeyAuthResult) => {
@@ -81,49 +62,21 @@ export default function LoginPage() {
         window.location.assign(result.redirectUrl);
         return;
       }
-      if (result.userName) {
-        if (redirect) {
-          try {
-            const redirectUrl = await startRedirect(redirect);
-            window.location.assign(redirectUrl);
-            return;
-          } catch {
-            // Continue with canonical session if redirect fails.
-          }
-        }
-        router.replace("/");
-        return;
-      }
-      try {
-        const status = await getAuthStatus({ force: true });
-        if (status.authenticated) {
-          if (redirect) {
-            try {
-              const redirectUrl = await startRedirect(redirect);
-              window.location.assign(redirectUrl);
-              return;
-            } catch {
-              // Continue with canonical session if redirect fails.
-            }
-          }
-          router.replace("/");
+      if (redirect) {
+        try {
+          const redirectUrl = await startRedirect(redirect);
+          window.location.assign(redirectUrl);
           return;
+        } catch {
+          // Fall through to home if redirect fails.
         }
-        router.replace(status.setup_complete ? "/login" : "/setup");
-      } catch {
-        router.replace("/setup");
       }
+      router.replace("/");
     },
     [router, redirect],
   );
 
-  if (!ready) {
-    return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </main>
-    );
-  }
+  if (!ready) return null;
 
   return (
     <main className="flex min-h-screen items-center justify-center">
