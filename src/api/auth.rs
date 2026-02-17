@@ -1,7 +1,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Redirect;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -101,16 +101,20 @@ struct RedirectStartRequest {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/auth/register/begin", post(register_begin))
-        .route("/auth/register/complete", post(register_complete))
-        .route("/auth/login/begin", post(login_begin))
-        .route("/auth/login/complete", post(login_complete))
-        .route("/auth/redirect/start", post(redirect_start))
-        .route("/auth/redirect/complete", get(redirect_complete))
-        .route("/auth/logout", post(logout))
-        .route("/auth/passkeys", get(list_passkeys))
-        .route("/auth/passkeys/{id}/name", patch(rename_passkey))
-        .route("/auth/passkeys/{id}", delete(delete_passkey))
+        .route("/register/begin", post(register_begin))
+        .route("/register/complete", post(register_complete))
+        .route("/login/begin", post(login_begin))
+        .route("/login/complete", post(login_complete))
+        .route(
+            "/login/redirect",
+            post(redirect_start).get(redirect_complete),
+        )
+        .route("/logout", post(logout))
+        .route("/passkeys", get(list_passkeys))
+        .route(
+            "/passkeys/{id}",
+            patch(rename_passkey).delete(delete_passkey),
+        )
 }
 
 // --- Handlers ---
@@ -158,7 +162,7 @@ fn normalize_redirect_path(path: Option<&str>) -> String {
 }
 
 fn redirect_complete_url(origin: &str, token: &str) -> String {
-    format!("{origin}/api/auth/redirect/complete?token={token}")
+    format!("{origin}/api/login/redirect?token={token}")
 }
 
 fn issue_login_redirect_token(

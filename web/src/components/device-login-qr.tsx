@@ -29,7 +29,7 @@ async function copyText(text: string): Promise<void> {
 
 async function createRedirectUrl(): Promise<string> {
   const redirectOrigin = window.location.origin;
-  const res = await apiFetch("/api/auth/redirect/start", {
+  const res = await apiFetch("/api/login/redirect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

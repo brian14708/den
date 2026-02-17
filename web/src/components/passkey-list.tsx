@@ -40,7 +40,7 @@ export function PasskeyList() {
 
   const fetchPasskeys = useCallback(async () => {
     try {
-      const res = await apiFetch("/api/auth/passkeys");
+      const res = await apiFetch("/api/passkeys");
       if (!res.ok) throw new Error("Failed to load passkeys");
       setPasskeys(await res.json());
     } catch (error) {
@@ -59,7 +59,7 @@ export function PasskeyList() {
     const trimmed = editName.trim();
     if (!trimmed) return;
     try {
-      const res = await apiFetch(`/api/auth/passkeys/${id}/name`, {
+      const res = await apiFetch(`/api/passkeys/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed }),
@@ -76,7 +76,7 @@ export function PasskeyList() {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      const res = await apiFetch(`/api/auth/passkeys/${deleteTarget.id}`, {
+      const res = await apiFetch(`/api/passkeys/${deleteTarget.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Delete failed");

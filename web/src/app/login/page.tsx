@@ -6,7 +6,7 @@ import { Login } from "@/components/auth/login";
 import { type PasskeyAuthResult, type RedirectRequest } from "@/lib/webauthn";
 
 async function startRedirect(redirect: RedirectRequest): Promise<string> {
-  const res = await fetch("/api/auth/redirect/start", {
+  const res = await fetch("/api/login/redirect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -33,7 +33,7 @@ function readRedirectFromLocation(): RedirectRequest | undefined {
 }
 
 async function isSetupComplete(): Promise<boolean> {
-  const res = await fetch("/api/auth/register/begin", {
+  const res = await fetch("/api/register/begin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",

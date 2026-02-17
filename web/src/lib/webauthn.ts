@@ -225,7 +225,7 @@ export async function registerPasskey(
   }
   applyRedirectPayload(payload, redirect);
 
-  const beginRes = await apiFetch("/api/auth/register/begin", {
+  const beginRes = await apiFetch("/api/register/begin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -279,7 +279,7 @@ export async function registerPasskey(
     extensions: credential.getClientExtensionResults(),
   };
 
-  const completeRes = await apiFetch("/api/auth/register/complete", {
+  const completeRes = await apiFetch("/api/register/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ challenge_id, credential: credentialData }),
@@ -311,7 +311,7 @@ export async function loginWithPasskey(
   } = {};
   applyRedirectPayload(beginPayload, redirect);
 
-  const beginRes = await apiFetch("/api/auth/login/begin", {
+  const beginRes = await apiFetch("/api/login/begin", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(beginPayload),
@@ -363,7 +363,7 @@ export async function loginWithPasskey(
     extensions: credential.getClientExtensionResults(),
   };
 
-  const completeRes = await apiFetch("/api/auth/login/complete", {
+  const completeRes = await apiFetch("/api/login/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ challenge_id, credential: credentialData }),
