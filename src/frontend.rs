@@ -26,7 +26,7 @@ fn is_safe_rel_path(path: &str) -> bool {
 }
 
 fn is_asset_path(path: &str) -> bool {
-    path.starts_with("_next/") || path.contains('.')
+    path.starts_with("_next/")
 }
 
 fn resolve_web_out_dir() -> Option<PathBuf> {
@@ -193,8 +193,8 @@ mod tests {
     #[test]
     fn asset_paths_skip_spa_fallback() {
         assert!(is_asset_path("_next/static/chunks/app.js"));
-        assert!(is_asset_path("favicon.ico"));
-        assert!(is_asset_path("foo/bar.png"));
+        assert!(!is_asset_path("favicon.ico"));
+        assert!(!is_asset_path("foo/bar.png"));
         assert!(!is_asset_path("settings"));
         assert!(!is_asset_path("setup"));
     }
