@@ -12,7 +12,7 @@ const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const ENV_WEB_OUT_DIR: &str = "DEN_WEB_OUT_DIR";
 
 fn cache_control_for_path(path: &str) -> Option<&'static str> {
-    if path.starts_with("_next/static/") {
+    if path.starts_with("_next/") {
         Some(CACHE_CONTROL_IMMUTABLE)
     } else {
         None
@@ -117,17 +117,20 @@ async fn handle_request(request: Request<Body>) -> Response {
 
     let is_asset = is_asset_path(rel_path);
 
-    let assets_dir = ServeDir::new(&root).append_index_html_on_directories(true);
-    let routes_dir = ServeDir::new(&root)
-        .append_index_html_on_directories(true)
-        .not_found_service(ServeFile::new(root.join("_not-found/index.html")));
-
+    let dir = ServeDir::new(&root).append_index_html_on_directories(true);
     let req = build_request_for_path(&base_request, base_request.uri.path());
-    let mut res = if is_asset {
-        assets_dir.oneshot(req).await.unwrap().map(Body::new)
-    } else {
-        routes_dir.oneshot(req).await.unwrap().map(Body::new)
-    };
+    let mut res = dir.oneshot(req).await.unwrap().map(Body::new);
+
+    if res.status() == StatusCode::NOT_FOUND && !is_asset {
+        let req = build_request_for_path(&base_request, "/_not-found/index.html");
+        let mut fallback = ServeFile::new(root.join("_not-found/index.html"))
+            .oneshot(req)
+            .await
+            .unwrap()
+            .map(Body::new);
+        *fallback.status_mut() = StatusCode::NOT_FOUND;
+        res = fallback;
+    }
 
     if res.status() != StatusCode::NOT_FOUND {
         maybe_apply_cache_header(rel_path, &mut res);
