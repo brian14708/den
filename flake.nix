@@ -130,9 +130,10 @@
                 commonArgs
                 // {
                   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-                  preBuild = ''
-                    mkdir -p web/out
-                    cp -r ${frontend}/* web/out/
+                  postInstall = ''
+                    mkdir -p $out/share/${pname}/web/out
+                    cp -r ${frontend}/* $out/share/${pname}/web/out/
+                    chmod -R u+w $out/share/${pname}/web/out
                   '';
                 }
               );

@@ -1,14 +1,14 @@
 # den
 
-Personal agent hub & dashboard. Rust + Next.js → single binary.
+Personal agent hub & dashboard. Rust + Next.js.
 
 This file is the shared memory for all coding agents. Read it every session. Update it as you learn.
 
 ## Stack
 
-- Rust (axum) backend, serves API + embedded frontend
-- Next.js 16 static export (React 19, Tailwind v4) via `rust-embed`
-- Nix flake: crane (Rust) + pnpm (frontend) → single binary or OCI image
+- Rust (axum) backend, serves API + frontend assets from disk
+- Next.js 16 static export (React 19, Tailwind v4)
+- Nix flake: crane (Rust) + pnpm (frontend) → package or OCI image
 
 ## Commands
 
@@ -34,12 +34,11 @@ src/auth.rs        — JWT claims, AuthUser/MaybeAuthUser extractors
 src/origin.rs      — shared origin/header parsing + allowed host normalization
 src/middleware.rs  — cross-cutting HTTP middleware (canonical auth-origin redirects)
 src/state.rs       — AppState (SqlitePool, Webauthn, JWT secret)
-src/frontend.rs    — rust-embed static serving + SPA fallback
+src/frontend.rs    — filesystem static serving + SPA fallback
 migrations/        — sqlx migrations (run automatically on startup)
 web/src/app/       — Next.js App Router pages
 web/src/lib/       — shared utilities (webauthn browser helpers)
 web/src/components/ — React components (auth/, ui/)
-build.rs           — creates empty web/out/ so rust-embed compiles without frontend
 flake.nix          — full build pipeline + dev shell
 ```
 
@@ -50,7 +49,7 @@ flake.nix          — full build pipeline + dev shell
 - Run formatters directly: `cargo fmt` and `cd web && pnpm fmt`
 - API endpoints: create `src/api/foo.rs`, add `mod foo` + route in `src/api/mod.rs`
 - Frontend pages: create `web/src/app/foo/page.tsx`
-- `rust-embed` reads `web/out/` from disk in debug, embeds in release
+- Frontend assets served from `DEN_WEB_OUT_DIR` or `$exe/../share/den/web/out`; dev fallback is `./web/out`
 - Keep dependencies minimal
 - Git: conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`), lowercase, imperative, no period
 - Always run lints before committing: `cargo fmt`, `cargo clippy`, `cd web && pnpm lint && pnpm fmt && pnpm build`
@@ -73,10 +72,9 @@ allowed_hosts = []
 
 Record architectural decisions, gotchas, and preferences here as they arise.
 
-- `rust-embed` over `include_dir` — supports debug-mode filesystem reads without recompile
+- Serve frontend from filesystem: resolve via `DEN_WEB_OUT_DIR`, then `$exe/../share/den/web/out`, then `./web/out`
 - pnpm in nix: use top-level `pkgs.fetchPnpmDeps` + `pkgs.pnpmConfigHook`, not `pnpm_10.fetchDeps` (deprecated); `fetcherVersion = 3` required
-- crane `cleanCargoSource` strips non-Rust files — frontend copied via `preBuild` in `buildPackage`
-- `build.rs` creates empty `web/out/` so the project compiles even without a frontend build
+- crane `cleanCargoSource` strips non-Rust files — frontend built separately and installed under `$out/share/den/web/out`
 - sqlx migrations: add numbered SQL files in `migrations/` (e.g. `0002_widgets.sql`), they run automatically on startup
 - nix build uses `SQLX_OFFLINE=true` — after changing queries, run `cargo sqlx prepare` to update `.sqlx/` cache
 - Run Rust/JS formatters directly instead of relying on a combined formatter command

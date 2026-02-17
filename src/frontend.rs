@@ -1,80 +1,111 @@
-use axum::http::{StatusCode, Uri, header};
-use axum::response::{IntoResponse, Response};
-use rust_embed::Embed;
+use std::path::{Component, Path, PathBuf};
 
-#[derive(Embed)]
-#[folder = "web/out"]
-struct Assets;
+use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
 
 const CACHE_CONTROL_IMMUTABLE: &str = "public, max-age=31536000, immutable";
-const CACHE_CONTROL_DEFAULT: &str = "public, max-age=60";
+const ENV_WEB_OUT_DIR: &str = "DEN_WEB_OUT_DIR";
 
-fn cache_control_for_path(path: &str) -> &'static str {
+fn cache_control_for_path(path: &str) -> Option<&'static str> {
     if path.starts_with("_next/static/") {
-        CACHE_CONTROL_IMMUTABLE
+        Some(CACHE_CONTROL_IMMUTABLE)
     } else {
-        CACHE_CONTROL_DEFAULT
+        None
     }
 }
 
+fn is_safe_rel_path(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn resolve_web_out_dir() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(ENV_WEB_OUT_DIR) {
+        let path = PathBuf::from(path);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bin_dir) = exe.parent() {
+            let path = bin_dir.join("../share/den/web/out");
+            if path.is_dir() {
+                return Some(path);
+            }
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join("web/out");
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+async fn read_file(root: &Path, rel: &str) -> Option<Vec<u8>> {
+    if rel.is_empty() || !is_safe_rel_path(rel) {
+        return None;
+    }
+    let path = root.join(rel);
+    tokio::fs::read(path).await.ok()
+}
+
+fn response_for_bytes(
+    content_type: &str,
+    cache_control: Option<&'static str>,
+    bytes: Vec<u8>,
+) -> Response {
+    let mut res = (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, content_type)],
+        bytes,
+    )
+        .into_response();
+
+    if let Some(cache_control) = cache_control {
+        res.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static(cache_control),
+        );
+    }
+
+    res
+}
+
 pub async fn handler(uri: Uri) -> Response {
+    let Some(root) = resolve_web_out_dir() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
     let path = uri.path().trim_start_matches('/');
     let path = path.trim_end_matches('/');
 
-    // Exact file match (JS, CSS, images, etc.)
-    if let Some(file) = Assets::get(path) {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-        let cache_control = cache_control_for_path(path);
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, mime.as_ref()),
-                (header::CACHE_CONTROL, cache_control),
-            ],
-            file.data,
-        )
-            .into_response();
-    }
-
-    // Try .html extension (e.g. /settings -> settings.html)
-    if let Some(file) = Assets::get(&format!("{path}.html")) {
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (header::CACHE_CONTROL, CACHE_CONTROL_DEFAULT),
-            ],
-            file.data,
-        )
-            .into_response();
-    }
-
-    // Try index.html in subdirectory (e.g. /foo/ -> foo/index.html)
     if !path.is_empty()
-        && let Some(file) = Assets::get(&format!("{path}/index.html"))
+        && let Some(bytes) = read_file(&root, path).await
     {
-        return (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (header::CACHE_CONTROL, CACHE_CONTROL_DEFAULT),
-            ],
-            file.data,
-        )
-            .into_response();
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        return response_for_bytes(mime.as_ref(), cache_control_for_path(path), bytes);
     }
 
-    // SPA fallback — serve index.html for client-side routing
-    match Assets::get("index.html") {
-        Some(file) => (
-            StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (header::CACHE_CONTROL, CACHE_CONTROL_DEFAULT),
-            ],
-            file.data,
-        )
-            .into_response(),
+    if !path.is_empty()
+        && let Some(bytes) = read_file(&root, &format!("{path}.html")).await
+    {
+        return response_for_bytes("text/html; charset=utf-8", None, bytes);
+    }
+
+    if !path.is_empty()
+        && let Some(bytes) = read_file(&root, &format!("{path}/index.html")).await
+    {
+        return response_for_bytes("text/html; charset=utf-8", None, bytes);
+    }
+
+    match read_file(&root, "index.html").await {
+        Some(bytes) => response_for_bytes("text/html; charset=utf-8", None, bytes),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -87,13 +118,23 @@ mod tests {
     fn next_static_assets_are_immutable() {
         assert_eq!(
             cache_control_for_path("_next/static/chunks/app.js"),
-            CACHE_CONTROL_IMMUTABLE
+            Some(CACHE_CONTROL_IMMUTABLE)
         );
     }
 
     #[test]
-    fn non_next_assets_use_short_cache() {
-        assert_eq!(cache_control_for_path("index.html"), CACHE_CONTROL_DEFAULT);
-        assert_eq!(CACHE_CONTROL_DEFAULT, "public, max-age=60");
+    fn non_next_assets_do_not_set_cache_control() {
+        assert_eq!(cache_control_for_path("index.html"), None);
+    }
+
+    #[test]
+    fn path_traversal_is_rejected() {
+        assert!(!is_safe_rel_path("../secrets.txt"));
+        assert!(!is_safe_rel_path(".."));
+        assert!(!is_safe_rel_path("./index.html"));
+        assert!(!is_safe_rel_path("/index.html"));
+        assert!(!is_safe_rel_path("a/../../b"));
+        assert!(is_safe_rel_path("_next/static/chunks/app.js"));
+        assert!(is_safe_rel_path("settings.html"));
     }
 }
