@@ -6,6 +6,7 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import "./globals.css";
 
 import { routeTree } from "./routeTree.gen";
+import { ThemeProvider } from "@/components/theme-provider";
 
 const router = createRouter({
   routeTree,
@@ -23,6 +24,8 @@ if (!rootEl) throw new Error("Missing #root element");
 
 createRoot(rootEl).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <ThemeProvider>
+      <RouterProvider router={router} />
+    </ThemeProvider>
   </StrictMode>,
 );

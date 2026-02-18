@@ -2,6 +2,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 
 import { DeviceLoginQr } from "@/components/device-login-qr";
 import { PasskeyList } from "@/components/passkey-list";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsRouteComponent,
@@ -19,6 +20,14 @@ function SettingsRouteComponent() {
         </Link>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
       </div>
+
+      <section className="mb-10">
+        <h2 className="mb-4 text-lg font-semibold">Appearance</h2>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground text-sm">Theme</span>
+          <ThemeToggle />
+        </div>
+      </section>
 
       <section className="mb-10">
         <h2 className="mb-4 text-lg font-semibold">Log In Another Device</h2>
